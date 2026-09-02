@@ -1,7 +1,7 @@
 -- sas.alarms: SCADA-side alarm evaluation and active-alarm-list state
 -- machine. Two kinds of alarms share the same activeList/lifecycle:
 --   - user-defined, config-driven condition alarms (evaluate() below),
---     e.g. "MMXU1.Vol lt 200" -> undervoltage;
+--     e.g. "MMXU1.VolAB lt 200" -> undervoltage;
 --   - built-in comm-health alarms (IED unreachable, GOOSE stale) that
 --     sas/scada/engine.lua raises/clears directly via raise()/clear(),
 --     since they aren't expressible as a single point-value condition.

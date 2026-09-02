@@ -52,10 +52,21 @@
   -- aggregate database. `ref` is a fully qualified point reference
   -- ("<iedName>/<ldName>/<LN>.<DOName>"); `condition` is one of
   -- "eq"|"ne"|"lt"|"gt".
+  -- Bus undervoltage as three phase-pair alarms, not one: a single-phase
+  -- sag (the common case for an unbalanced fault) only depresses one of
+  -- VolAB/VolBC/VolCA, so alarming on just one pair would miss it.
   alarms = {
     {
-      id = "V1_LOW", ref = "IED-BRK1/LD0/MMXU1.Vol", condition = "lt", value = 200,
-      severity = "medium", message = "Bus 1 undervoltage",
+      id = "V1_LOW_AB", ref = "IED-BRK1/LD0/MMXU1.VolAB", condition = "lt", value = 200,
+      severity = "medium", message = "Bus 1 undervoltage (AB)",
+    },
+    {
+      id = "V1_LOW_BC", ref = "IED-BRK1/LD0/MMXU1.VolBC", condition = "lt", value = 200,
+      severity = "medium", message = "Bus 1 undervoltage (BC)",
+    },
+    {
+      id = "V1_LOW_CA", ref = "IED-BRK1/LD0/MMXU1.VolCA", condition = "lt", value = 200,
+      severity = "medium", message = "Bus 1 undervoltage (CA)",
     },
     {
       id = "BRK1_OPEN", ref = "IED-BRK1/LD0/XCBR1.Pos", condition = "eq", value = "open",

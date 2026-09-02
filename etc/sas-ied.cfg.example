@@ -88,30 +88,52 @@
       },
       sbo = { timeoutSec = 30 },
     },
-    -- Bus voltage and feeder current, each read from its own physical
-    -- Create: Electro-Energistics gauge block (a voltmeter block and an
-    -- ammeter block -- two separate blocks, NOT one block queried two
-    -- ways). Each requires its own OpenComputers Adapter block placed
-    -- against it -- Create:EE's gauge only exposes a ComputerCraft
-    -- peripheral (verified against the mod's actual source, see
-    -- sas/io/meter.lua's header), and the Adapter is what turns that into
-    -- an OC component at all. Both blocks expose the SAME method name,
-    -- "getValue" -- which quantity comes back depends on which physical
-    -- block that address's Adapter face is touching, not on the method
-    -- name. Find each address with `component.list()` after placing the
-    -- Adapter; confirm with `component.proxy(addr).getMethods()`.
+    -- Bus voltage and feeder current -- a 3-phase circuit needs 3
+    -- independent ammeters (one per phase) and 3 independent voltmeters
+    -- (one per phase pair), never one meter standing in for all three:
+    -- in-world this is 6 separate Create: Electro-Energistics gauge
+    -- blocks (3 voltmeters, 3 ammeters), each its own physical block at
+    -- its own address, NOT one block queried six ways. Each requires its
+    -- own OpenComputers Adapter block placed against it -- Create:EE's
+    -- gauge only exposes a ComputerCraft peripheral (verified against the
+    -- mod's actual source, see sas/io/meter.lua's header), and the
+    -- Adapter is what turns that into an OC component at all. Every block
+    -- exposes the SAME method name, "getValue" -- which quantity/phase
+    -- comes back depends on which physical block that address's Adapter
+    -- face is touching, not on the method name. Find each address with
+    -- `component.list()` after placing the Adapter; confirm with
+    -- `component.proxy(addr).getMethods()`.
     --
     -- Operational caveat: getValue() also bakes in that specific gauge
     -- block's own in-world display-scale dial (its scroll-value UI) --
     -- set each gauge's scale to match what `deadband` below assumes (base
     -- units), since the scale can't be read or overridden from OC.
+    --
+    -- Phase current (WYE: one leg per phase conductor).
     {
-      ln = "MMXU1", doName = "Vol", type = "MV", goose = true, deadband = 2.0,
-      io = { kind = "meter", address = "<createee-voltmeter-adapter-address>", method = "getValue" },
+      ln = "MMXU1", doName = "AmpA", type = "MV", goose = true, deadband = 0.5,
+      io = { kind = "meter", address = "<createee-ammeter-a-adapter-address>", method = "getValue" },
     },
     {
-      ln = "MMXU1", doName = "Amp", type = "MV", goose = true, deadband = 0.5,
-      io = { kind = "meter", address = "<createee-ammeter-adapter-address>", method = "getValue" },
+      ln = "MMXU1", doName = "AmpB", type = "MV", goose = true, deadband = 0.5,
+      io = { kind = "meter", address = "<createee-ammeter-b-adapter-address>", method = "getValue" },
+    },
+    {
+      ln = "MMXU1", doName = "AmpC", type = "MV", goose = true, deadband = 0.5,
+      io = { kind = "meter", address = "<createee-ammeter-c-adapter-address>", method = "getValue" },
+    },
+    -- Phase-to-phase voltage (DEL: one leg per pair of phase conductors).
+    {
+      ln = "MMXU1", doName = "VolAB", type = "MV", goose = true, deadband = 2.0,
+      io = { kind = "meter", address = "<createee-voltmeter-ab-adapter-address>", method = "getValue" },
+    },
+    {
+      ln = "MMXU1", doName = "VolBC", type = "MV", goose = true, deadband = 2.0,
+      io = { kind = "meter", address = "<createee-voltmeter-bc-adapter-address>", method = "getValue" },
+    },
+    {
+      ln = "MMXU1", doName = "VolCA", type = "MV", goose = true, deadband = 2.0,
+      io = { kind = "meter", address = "<createee-voltmeter-ca-adapter-address>", method = "getValue" },
     },
     -- A spare generic status indicator (GGIO), simple on/off input.
     {
@@ -127,7 +149,7 @@
   -- handleOperate), after select-before-operate validation succeeds but
   -- before the physical output is applied -- only `operate` carries the
   -- target `value`, so `select` is never interlock-checked. Requires
-  -- this IED to have joined the shared `goose.group` above (it always
+  -- this IED to have the shared `goose.port` above open (it always
   -- does), AND requires the peer's own point to be published with
   -- `goose = true` in ITS OWN sas-ied.cfg -- an interlock referencing a
   -- peer point that peer never GOOSE-publishes will always be treated
@@ -165,7 +187,12 @@
   reports = {
     {
       name = "rcbStatus1",
-      dataset = { "XCBR1.Pos", "MMXU1.Vol", "MMXU1.Amp", "PTOC1.Op" },
+      dataset = {
+        "XCBR1.Pos",
+        "MMXU1.AmpA", "MMXU1.AmpB", "MMXU1.AmpC",
+        "MMXU1.VolAB", "MMXU1.VolBC", "MMXU1.VolCA",
+        "PTOC1A.Op", "PTOC1B.Op", "PTOC1C.Op",
+      },
       trgOps = {
         dchg = true,   -- report when a dataset point's value changes
         qchg = true,   -- report when a dataset point's quality changes
@@ -184,12 +211,21 @@
   -- re-pulse the breaker) until iedd restarts.
   protection = {
     -- PTOC (time-overcurrent): real trip logic, magnitude-only (see
-    -- MMXU1.Amp's caveat above -- getValue() has no phase angle, but a
-    -- plain overcurrent scheme only ever needs magnitude anyway).
+    -- MMXU1.AmpA/B/C's caveat above -- getValue() has no phase angle, but
+    -- a plain overcurrent scheme only ever needs magnitude anyway). ONE
+    -- SCHEME PER PHASE (PTOC1A/B/C, each watching its own phase current)
+    -- -- matches real numerical relays' separate 50/51-A/B/C elements,
+    -- and is required for correctness: a single-phase-to-ground fault
+    -- (the most common fault type) only elevates ONE phase's current, so
+    -- a scheme watching just one phase would miss faults on the other
+    -- two. `protection.ptoc` is a plain list, so this needs no new
+    -- concept -- just one entry per phase, each with its own trip target/
+    -- synthetic Op point (here they all trip the same breaker, which is
+    -- the normal case -- a 3-phase breaker trips all 3 phases together).
     ptoc = {
       {
-        name = "PTOC1",              -- becomes the synthetic status point "PTOC1.Op" (goose=true)
-        input = "MMXU1.Amp",         -- this IED's own MV point to monitor
+        name = "PTOC1A",              -- becomes the synthetic status point "PTOC1A.Op" (goose=true)
+        input = "MMXU1.AmpA",         -- this IED's own MV point to monitor
         trip = "XCBR1.PosCtl",       -- this IED's own control point to operate on trip
         pickup = 1.2,                 -- amps; curve math only engages above this
         curve = "IEC_VERY_INVERSE",   -- see sas/protection/curves.lua for the full list, or "DEFINITE_TIME"
@@ -197,6 +233,16 @@
         -- definiteTimeSec = 0.5,     -- only used when curve = "DEFINITE_TIME"
         resetSec = 0.1,               -- accumulator decay rate once back under pickup
         respectInterlocks = false,    -- protection trips bypass interlocks by default ("protection wins")
+      },
+      {
+        name = "PTOC1B", input = "MMXU1.AmpB", trip = "XCBR1.PosCtl",
+        pickup = 1.2, curve = "IEC_VERY_INVERSE", timeMultiplier = 0.3,
+        resetSec = 0.1, respectInterlocks = false,
+      },
+      {
+        name = "PTOC1C", input = "MMXU1.AmpC", trip = "XCBR1.PosCtl",
+        pickup = 1.2, curve = "IEC_VERY_INVERSE", timeMultiplier = 0.3,
+        resetSec = 0.1, respectInterlocks = false,
       },
     },
     -- PDIF (transformer differential): real trip logic, magnitude-
@@ -206,15 +252,32 @@
     -- breaker IED -- see remoteTrips below for how it actually trips the
     -- surrounding breakers it doesn't own. Commented out here since this
     -- example file is a single breaker IED, not a transformer IED.
+    -- ONE SCHEME PER PHASE (PDIF1A/B/C, each comparing that phase's own
+    -- HV CT against that same phase's own LV CT) -- each `inputs` pair
+    -- MUST be the same phase on both sides: pdif.lua is magnitude-only
+    -- with no vector/phase-shift compensation, so pairing two DIFFERENT
+    -- phases (or a single "representative" phase standing in for all
+    -- three) would both miss a single-phase internal fault on the other
+    -- two phases and risk a false trip from comparing mismatched phases.
     -- pdif = {
     --   {
-    --     name = "PDIF1",
+    --     name = "PDIF1A",
     --     inputs = {
-    --       { ref = "MMXU1.Amp", scale = 1.0 },     -- HV-side CT
-    --       { ref = "MMXU2.Amp", scale = 3.478 },   -- LV-side CT, turns-ratio-normalized to the HV side
+    --       { ref = "MMXU1.AmpA", scale = 1.0 },     -- HV-side CT, phase A
+    --       { ref = "MMXU2.AmpA", scale = 3.478 },   -- LV-side CT, phase A, turns-ratio-normalized to the HV side
     --     },
     --     minPickup = 0.2,        -- amps; below this, never trips regardless of restraint
     --     restraintSlope = 0.4,   -- trips when |diff| > restraintSlope * (|i1|+|i2|)/2
+    --   },
+    --   {
+    --     name = "PDIF1B",
+    --     inputs = { { ref = "MMXU1.AmpB", scale = 1.0 }, { ref = "MMXU2.AmpB", scale = 3.478 } },
+    --     minPickup = 0.2, restraintSlope = 0.4,
+    --   },
+    --   {
+    --     name = "PDIF1C",
+    --     inputs = { { ref = "MMXU1.AmpC", scale = 1.0 }, { ref = "MMXU2.AmpC", scale = 3.478 } },
+    --     minPickup = 0.2, restraintSlope = 0.4,
     --   },
     -- },
     -- PDIS (distance): NOT FUNCTIONAL -- see sas/protection/pdis.lua's
@@ -231,15 +294,30 @@
 
   -- Cross-IED trip commands: the inverse of `interlocks` above (forces a
   -- local operate instead of blocking one), for a peer protection
-  -- scheme's synthetic Op point commanding THIS breaker to open -- e.g.
-  -- a transformer IED's PDIF1.Op reaching the two breaker IEDs adjacent
-  -- to its taps. Always bypasses local interlocks (protection commands
-  -- win). Commented out here for the same reason as pdif above -- see
-  -- scl/switchyard.scd's worked example for a live instance.
+  -- scheme's synthetic Op point commanding THIS breaker to open -- e.g. a
+  -- transformer IED's PDIF1A/B/C.Op reaching the two breaker IEDs
+  -- adjacent to its taps. Always bypasses local interlocks (protection
+  -- commands win). Commented out here for the same reason as pdif above
+  -- -- see scl/switchyard.scd's worked example for a live instance. ONE
+  -- RULE PER PHASE, matching the per-phase PDIF1A/B/C schemes above --
+  -- ANY single phase's differential operating must open this breaker, so
+  -- each phase's Op is its own independent rule (the "OR" is the fact
+  -- that three separate rules can each independently force the same
+  -- operate, not a single rule watching one combined signal).
   remoteTrips = {
     -- {
-    --   id = "XFMR1_DIFF_TRIP",
-    --   peerIed = "IED-XFMR1", peerRef = "PDIF1.Op", condition = "eq", peerValue = true,
+    --   id = "XFMR1_DIFF_TRIP_A",
+    --   peerIed = "IED-XFMR1", peerRef = "PDIF1A.Op", condition = "eq", peerValue = true,
+    --   localRef = "XCBR1.PosCtl", tripValue = "open",
+    -- },
+    -- {
+    --   id = "XFMR1_DIFF_TRIP_B",
+    --   peerIed = "IED-XFMR1", peerRef = "PDIF1B.Op", condition = "eq", peerValue = true,
+    --   localRef = "XCBR1.PosCtl", tripValue = "open",
+    -- },
+    -- {
+    --   id = "XFMR1_DIFF_TRIP_C",
+    --   peerIed = "IED-XFMR1", peerRef = "PDIF1C.Op", condition = "eq", peerValue = true,
     --   localRef = "XCBR1.PosCtl", tripValue = "open",
     -- },
   },

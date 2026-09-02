@@ -195,14 +195,26 @@ inverse of `interlocks`: forces an operate instead of blocking one).
   while over pickup, decaying by `resetSec` otherwise). Magnitude-only,
   same as every measurement in this codebase (Create:EE's `getValue()`
   has no phase angle) -- a plain overcurrent scheme only ever needs
-  magnitude anyway, so this is a real, working relay.
+  magnitude anyway, so this is a real, working relay. **One scheme per
+  phase** (`PTOC1A`/`PTOC1B`/`PTOC1C`, each watching its own
+  `MMXU1.AmpA`/`AmpB`/`AmpC`, matching real numerical relays' separate
+  50/51-A/B/C elements): `protection.ptoc` is a plain list, so this needs
+  no dedicated concept, just one entry per phase -- and is required for
+  correctness, since a single-phase-to-ground fault (the most common
+  fault type) only elevates one phase's current.
 - **PDIF** (transformer differential, `sas/protection/pdif.lua`): real
   trip logic, magnitude-restrained (no vector/phase-shift compensation).
   Requires two local CT inputs (HV+LV) on the *same* IED -- there's no
   low-latency cross-IED read path suitable for a differential trip's
   timing, which is why a transformer needs its own dedicated protection
   IED with local HV+LV meters (see `scl/README.md`'s `XFMR1`) rather than
-  living on a breaker IED.
+  living on a breaker IED. **One scheme per phase** (`PDIF1A`/`PDIF1B`/
+  `PDIF1C`), each comparing that phase's own HV CT against that same
+  phase's own LV CT -- required, not just recommended, since a scheme
+  fed only one "representative" phase (or comparing two different
+  phases) would both miss a single-phase internal fault on the other two
+  phases and risk a false trip from a mismatched pairing, given pdif.lua
+  has no phase-shift compensation to correct for it.
 - **PDIS** (distance, `sas/protection/pdis.lua`): **not functional.**
   Impedance is a V/I phasor ratio, and this hardware has no phase-angle
   data source -- only scalar magnitude. Config-modeled for data-model
@@ -337,13 +349,16 @@ same as before).
 ## Known limitations / risks
 
 - **Create: Electro-Energistics meter binding** (`sas/io/meter.lua`,
-  `sas-ied.cfg`'s `MMXU1.Vol`/`MMXU1.Amp` points) is no longer a
-  placeholder guess -- verified against the mod's actual source (single
-  shared `getValue()` method, quantity determined by the physical block)
-  and against OpenComputers' own Adapter bridge source (an Adapter block
-  is required, since the mod only exposes a ComputerCraft peripheral).
-  See `sas/io/meter.lua`'s header for the full citation. Residual risk:
-  verified against source, not by running it in-game -- spot-check
+  `sas-ied.cfg`'s `MMXU1.AmpA/B/C`/`MMXU1.VolAB/BC/CA` points -- 6
+  independent meters per 3-phase measurement point, one per phase
+  current and one per phase-to-phase voltage, never one meter standing
+  in for all three) is no longer a placeholder guess -- verified against
+  the mod's actual source (single shared `getValue()` method, quantity
+  determined by the physical block) and against OpenComputers' own
+  Adapter bridge source (an Adapter block is required, since the mod
+  only exposes a ComputerCraft peripheral). See `sas/io/meter.lua`'s
+  header for the full citation. Residual risk: verified against source,
+  not by running it in-game -- spot-check
   `component.list()`/`component.proxy(addr).getMethods()` against your
   actual modpack's OpenComputers build, and set each gauge's in-world
   scale dial to match the configured `deadband`.
@@ -432,25 +447,33 @@ runbook, in order:
    `gooseStaleAfterSec`, confirm A's operate is still blocked (default
    fail-safe), set `failOpen = true` on the rule, and confirm it is now
    allowed through (fail-open verified).
-6. **PTOC trip.** Configure a `protection.ptoc` scheme on an IED (see
-   `etc/sas-ied.cfg.example`); drive the bound ammeter above `pickup` and
-   hold it there. Confirm `<name>.Op` goes true once the accumulator
-   crosses 1.0 (roughly `curves.timeToTrip(curve, measured/pickup, tms)`
-   seconds after crossing pickup, not instantly), the breaker's control
-   point pulses **without** a `select` ever happening (protection bypasses
-   SBO), and a second overcurrent excursion after the trip does *not*
-   re-pulse it (latched until `iedd` restart). Drive the current back
-   under pickup before tripping and confirm the accumulator decays
-   (`resetSec`) instead of tripping.
-7. **PDIF trip + remote trip.** Three IED nodes: a transformer-protection
-   IED with local HV+LV CT meters and a `protection.pdif` scheme, plus two
-   breaker IEDs each carrying a `remoteTrips` rule watching that scheme's
-   `PDIF1.Op`. Drive the two CT readings apart past `minPickup`/
-   `restraintSlope` (e.g. hold LV near zero while HV carries load, an
-   "internal fault" pattern) and confirm `PDIF1.Op` goes true, both
-   breaker IEDs' control points pulse to `open` within one GOOSE
-   burst-retransmit interval, and a balanced/through-load current pair
-   does *not* trip it.
+6. **PTOC trip, per phase.** Configure the 3 per-phase `protection.ptoc`
+   schemes on an IED (see `etc/sas-ied.cfg.example`'s `PTOC1A/B/C`); drive
+   ONLY the phase-A ammeter (`MMXU1.AmpA`) above `pickup` and hold it
+   there, leaving phase B/C untouched. Confirm `PTOC1A.Op` goes true once
+   the accumulator crosses 1.0 (roughly `curves.timeToTrip(curve,
+   measured/pickup, tms)` seconds after crossing pickup, not instantly)
+   while `PTOC1B.Op`/`PTOC1C.Op` stay false (confirms the schemes are
+   genuinely independent per phase, not sharing one combined reading),
+   the breaker's control point pulses **without** a `select` ever
+   happening (protection bypasses SBO), and a second overcurrent
+   excursion after the trip does *not* re-pulse it (latched until `iedd`
+   restart). Drive the current back under pickup before tripping and
+   confirm the accumulator decays (`resetSec`) instead of tripping.
+7. **PDIF trip + remote trip, per phase.** Three IED nodes: a
+   transformer-protection IED with local HV+LV CT meters and the 3
+   per-phase `protection.pdif` schemes (`PDIF1A/B/C`), plus two breaker
+   IEDs each carrying 3 `remoteTrips` rules (one per phase's `Op`). Drive
+   ONLY phase A's two CT readings apart past `minPickup`/`restraintSlope`
+   (e.g. hold LV-phase-A near zero while HV-phase-A carries load, an
+   "internal fault" pattern), leaving phase B/C's HV/LV pairs balanced,
+   and confirm `PDIF1A.Op` goes true while `PDIF1B.Op`/`PDIF1C.Op` stay
+   false (confirms per-phase independence -- a single combined-phase
+   scheme would either miss this single-phase fault or, worse, false-trip
+   on a phase that was never actually faulted), both breaker IEDs'
+   control points pulse to `open` within one GOOSE burst-retransmit
+   interval, and a balanced/through-load current pair on every phase does
+   *not* trip any of the three.
 8. **ReportControl.** Configure `reports` on an IED (see `rcbStatus1` in
    `etc/sas-ied.cfg.example`); confirm SCADA's `subscribe` names the
    `rcbName` (not `refs="*"`) and receives one full-dataset report
