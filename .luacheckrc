@@ -1,7 +1,6 @@
 -- luacheck config for OpenComputers/OpenOS/MineOS Lua code. Declares the
 -- component-model globals and OpenOS library globals this codebase uses,
--- so luacheck doesn't false-positive "undefined global" on every file --
--- a gap OC-IP-Stack's own repo doesn't close, closed here instead.
+-- so luacheck doesn't false-positive "undefined global" on every file.
 std = "lua53"
 
 globals = {
@@ -16,7 +15,3 @@ globals = {
 -- codebase's small handler closures.
 unused_args = false
 allow_defined_top = true
-
-exclude_files = {
-  "oc-ip-stack-ref/*",
-}

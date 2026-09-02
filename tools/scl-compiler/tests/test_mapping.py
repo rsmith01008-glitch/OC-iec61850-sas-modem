@@ -51,7 +51,6 @@ class TestMapIed(unittest.TestCase):
         self.assertEqual(self.cfg["mms"], {"port": 8102})
 
     def test_goose_transport(self):
-        self.assertEqual(self.cfg["goose"]["group"], "255.10")
         self.assertEqual(self.cfg["goose"]["port"], 8104)
         self.assertEqual(self.cfg["goose"]["heartbeatSec"], 5.0)
         # MinTime=100ms -> 0.1s ladder start, no Private override in fixture
@@ -118,12 +117,13 @@ class TestMapScada(unittest.TestCase):
         self.cfg = map_scada(self.root, ied_elem)
 
     def test_identity(self):
+        self.assertEqual(self.cfg["scadaName"], "SCADA1")
         self.assertEqual(self.cfg["hms"], {"port": 8103})
-        self.assertEqual(self.cfg["goose"], {"port": 8104, "group": "255.10"})
+        self.assertEqual(self.cfg["goose"], {"port": 8104})
         self.assertEqual(self.cfg["resyncSec"], 60)
 
     def test_ieds_derived_from_subnetwork(self):
-        self.assertEqual(self.cfg["ieds"], [{"name": "BRK1", "ip": "1.10", "port": 8102}])
+        self.assertEqual(self.cfg["ieds"], [{"name": "BRK1"}])
 
     def test_historian_and_alarms(self):
         self.assertEqual(self.cfg["historian"]["dir"], "/var/log/sas-scada")

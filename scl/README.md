@@ -67,9 +67,9 @@ is why `XFMR1`'s differential trip (`PDIF1.Op`) reaches all four via
 - **Descriptive-only** (present in the SCL for schema-completeness and
   human documentation, not consumed by the compiler or enforced by any
   runtime code): `GSE/Address` MAC-Address/APPID/VLAN-ID/VLAN-PRIORITY
-  (OC-IP-Stack has no 802.1Q/priority-queue concept underneath --
-  see the OC-IP-Stack transport enhancement writeup for what a real
-  implementation would need), the `SampledValueControl`/`SMV` on `XFMR1`
+  (the built-in OpenComputers modem transport underneath -- see
+  `sas/proto/netmsg.lua` -- has no 802.1Q/priority-queue concept), the
+  `SampledValueControl`/`SMV` on `XFMR1`
   (no process-bus streaming transport exists), `GSEControl@securityEnable`
   (always `"None"` -- no GOOSE authentication/encryption is implemented),
   and `RDRE1` (no oscillography capture exists).

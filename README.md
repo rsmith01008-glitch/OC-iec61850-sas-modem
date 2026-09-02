@@ -3,39 +3,39 @@
 An IEC 61850-inspired substation automation system for
 [OpenComputers](https://oc.cil.li/): a generic **IED**, a **SCADA** data
 concentrator, and a **MineOS** HMI, talking a simplified MMS-lite/GOOSE-lite
-protocol over [OC-IP-Stack](https://github.com/rsmith01008-glitch/OC-IP-Stack)
-(installed separately, unmodified, as an oppm dependency).
+protocol directly over OpenComputers' own built-in modem component
+(wired or wireless network card -- either works identically, see
+`sas/proto/netmsg.lua`). No external networking mod/dependency required.
 
 This is not a byte-perfect implementation of the real IEC 61850 standard --
 no SCL/ACSI object model, no real MMS/GOOSE wire encoding. It borrows
 61850's logical-device/logical-node/data-object naming, its
 client/server-reporting + GOOSE peer-messaging + select-before-operate
 control model, and applies them at a scope appropriate for an
-OpenComputers-scale network -- matching OC-IP-Stack's own "don't
-over-engineer for OC scale" design philosophy. GOOSE rides OC-IP-Stack's
-real multicast primitive (`ipstack.socket.multicast()`): subnet 255
-(`ip.MULTICAST_SUBNET`) is reserved for multicast group addresses in the
-same `"subnet.host"` space as everything else; there's no IGMP-equivalent
-(join/leave are purely local/software, never go on the wire); and,
-notably for a substation-scale deployment with relay nodes, a multicast
-group never crosses a relay node's other interfaces even with
-`ip.forwarding = true` -- it stays within its originating broadcast
-domain, matching real GOOSE's non-routed nature. MMS-lite (everything
-else -- get-model/read/subscribe/report/select/operate/cancel/alarm/
-history) stays TCP/unicast, matching the real standard, since MMS is
-never multicast in actual IEC 61850 either.
+OpenComputers-scale network. A modem has no TCP-style connection or
+delivery guarantee, so MMS-lite (get-model/read/subscribe/report/select/
+operate/cancel/alarm/history) is request/reply over unicast modem messages
+with its own timeout/retry layer (`sas/proto/mmsclient.lua`), addressed by
+runtime name discovery rather than a hand-configured address (see
+"Networking" below) -- matching the real standard's client/server model,
+since MMS is never multicast in actual IEC 61850 either. GOOSE rides a
+modem *broadcast* on a shared port (`sas/proto/goose.lua`,
+`sas/proto/netmsg.lua`): every node with that port open hears every
+publication, no join/leave step needed, mirroring real GOOSE's
+non-routed, fire-and-forget nature more directly than a socket-based
+multicast group would.
 
 ## Architecture
 
 ```
   scl/switchyard.scd  --[offline SCL compiler]-->  etc/generated/*.cfg  --[manual copy]-->  /etc/sas-*.cfg
 
-   HMI (MineOS)  <--MMS-lite (TCP)-->  SCADA  <--MMS-lite (TCP)-->  IED A
-                                         |                            |
-                                         +====== GOOSE-lite ==========+==== IED B  ...
-                                          (multicast, one shared       |
-                                           group; SCADA subscribes    ...
-                                           only, IEDs pub+sub)
+   HMI (MineOS)  <--MMS-lite (modem unicast)-->  SCADA  <--MMS-lite (modem unicast)-->  IED A
+                                                    |                                       |
+                                                    +============ GOOSE-lite ===============+==== IED B  ...
+                                                     (modem broadcast, one shared             |
+                                                      port; SCADA subscribes only,            ...
+                                                      IEDs pub+sub)
 ```
 
 Before any of the runtime pieces below start, there's a build-time stage:
@@ -45,9 +45,10 @@ config) is compiled offline into the `sas-ied-<name>.cfg`/`sas-scada.cfg`
 files the runtime actually reads. See "SCL / Substation Configuration
 Language" below.
 
-One shared GOOSE multicast group per station (`goose.group`, same address
-configured on the SCADA and on every IED): SCADA only subscribes; every
-IED both publishes its own points and subscribes to every other IED's, so
+One shared GOOSE broadcast port per station (`goose.port`, same modem port
+number configured on the SCADA and on every IED -- the port number itself
+is the "group", see "Networking" below): SCADA only subscribes; every IED
+both publishes its own points and subscribes to every other IED's, so
 peer-to-peer interlocking (see below) needs no involvement from SCADA.
 
 - **IED** (`sas/ied/engine.lua`, `rc.d/iedd.lua`): one generic,
@@ -58,12 +59,13 @@ peer-to-peer interlocking (see below) needs no involvement from SCADA.
   reached through an OpenComputers Adapter block since the mod only
   exposes a ComputerCraft peripheral -- see `sas/io/meter.lua`). Same
   program image runs on every IED; only the config differs. Also
-  subscribes to the shared GOOSE multicast group to track peer-published
+  subscribes to the shared GOOSE broadcast port to track peer-published
   points, for locally evaluated `interlocks` (see below) -- not just to
   publish its own.
 - **SCADA** (`sas/scada/engine.lua`, `rc.d/scadad.lua`): connects out to
-  every configured IED (learns each one's point list automatically via a
-  `get-model` request -- no hand-duplicated point lists in
+  every configured IED (resolved by name at runtime -- see "Networking"
+  below -- then learns each one's point list automatically via a
+  `get-model` request; no hand-duplicated address or point list in
   `sas-scada.cfg`), subscribes to reports and GOOSE, maintains a live
   aggregate database, evaluates alarms, logs to a historian, and serves
   that aggregate to HMI clients. Forwards HMI control commands down to the
@@ -74,16 +76,47 @@ peer-to-peer interlocking (see below) needs no involvement from SCADA.
   IED directly.
 
 Both `iedd` and `scadad` are `rc.d` daemons whose tick callback
-(`event.timer`) does one **entirely non-blocking** sweep every cycle --
-this mirrors OC-IP-Stack's own `ipstackd`/`daemon.lua` skeleton exactly,
-rather than inventing a different concurrency model. This relies on two
-facts confirmed by reading OC-IP-Stack's actual source, not assumed:
-`ipstack.socket` calls passed an explicit `timeoutSec = 0` (or, for
-`listener:accept()`, no argument at all) check their underlying condition
-exactly once and return immediately rather than yielding
-(`ipstack/core.lua`'s `waitUntil`); and `event.timer`/`event.listen`
-callbacks are serviced by *any* coroutine's `pullSignal`, not just the one
-that registered them (`ipstack/daemon.lua`).
+(`event.timer`) does one **entirely non-blocking** sweep every cycle:
+every modem read this codebase does inside a tick (`sas/proto/netmsg.lua`'s
+`drain`/`take`) is a single non-blocking queue check, never a wait, and
+`event.timer`/`event.listen` callbacks (including the `modem_message`
+listener netmsg registers) are serviced by OpenOS's own cooperative
+`pullSignal` loop regardless of which coroutine registered them.
+
+## Networking
+
+`sas/proto/netmsg.lua` wraps OpenComputers' `component.modem` (send/
+broadcast + the `modem_message` event) as this codebase's only transport
+primitive -- no external mod, no separate networking daemon/config to
+install or keep running. Two consequences of a modem being connectionless
+message-passing rather than a TCP-like stream, both handled once here
+rather than in every caller:
+
+- **No address book to hand-maintain.** A modem's own address is a
+  game-assigned UUID, not something you'd want to copy into every peer's
+  config by hand -- especially since it changes if a modem is ever
+  broken/replaced. Instead, `sas/proto/discovery.lua` gives every node a
+  human-chosen name (an IED's `iedName`, a SCADA's `scadaName`) and
+  resolves peers to a live (address, port) at runtime: a client broadcasts
+  a "who-is `<name>`" query on one well-known discovery port, and whichever
+  node has advertised that name answers directly. `.cfg` files reference
+  peers purely by name (`sas-scada.cfg`'s `ieds = {{ name = "IED-BRK1" }}`,
+  `sas-hmi.cfg`'s `scada = "SCADA"`) -- see each `.cfg.example`.
+- **No delivery/ordering guarantee, and no built-in retry.** Unlike TCP,
+  a modem send is fire-and-forget. `sas/proto/mmsclient.lua`'s Client
+  tracks each outstanding request's age and resends it after a short
+  timeout, up to a small retry limit, before giving up and reporting the
+  peer unreachable -- the same "connect failed -> alarm -> periodic
+  reconnect" behavior `sas/scada/engine.lua` always had, just driven by a
+  request timeout instead of a TCP error.
+
+This project assumes a single flat network -- every node within modem
+range/on the same wired network hears every other node's broadcasts and
+can reach every other node's unicast sends directly, with no relay/routing
+layer of its own (OpenComputers' own wired network cables + repeaters
+already extend a flat network's physical range for free; there's nothing
+for this codebase to add there). A substation too large or spread out for
+one flat network is out of scope.
 
 ## SCL / Substation Configuration Language
 
@@ -121,16 +154,15 @@ Real SCL never encodes protection/interlock/synchrocheck algorithms --
 only LN instances and their settable parameters. Everything this codebase
 needs that has no standard SCL home (redstone/meter I/O bindings, SBO
 timeouts, interlock/remote-trip rules, protection scheme parameters,
-GOOSE transport addressing, report cadence, SCADA's historian/alarms)
+GOOSE broadcast port, report cadence, SCADA's historian/alarms)
 lives in `Private type="oc-iec61850-sas"` extensions
 (`xmlns:oc="urn:oc-iec61850-sas:v1"`) -- see `tools/scl-compiler/README.md`
 and `scl/README.md` for the exact element shapes and what the compiler
 does/doesn't consume. In particular: `GSE/Address` MAC-Address/APPID/
 VLAN-ID/VLAN-PRIORITY and `SampledValueControl`/`SMV` are carried as
-schema-real but purely **descriptive** metadata -- OC-IP-Stack has no
-802.1Q/priority-queue or process-bus-streaming transport underneath, so
-none of it is enforced (a possible future OC-IP-Stack enhancement, not
-part of this repo).
+schema-real but purely **descriptive** metadata -- the built-in
+OpenComputers modem transport underneath has no 802.1Q/priority-queue or
+process-bus-streaming concept, so none of it is enforced.
 
 `scl/switchyard.scd` is a minimal, hand-verifiable worked example: a
 1½-breaker 800kV/230kV switchyard (two 3-breaker diameters, one
@@ -211,10 +243,8 @@ python3 tools/scl-compiler/scl_compile.py \
 ```
 
 ```
-oppm install oc-ip-stack
-cp /etc/ipstack.cfg.example /etc/ipstack.cfg   # edit: assign this node's modem(s) an address
-rc ipstackd enable
-rc ipstackd start
+# Every node just needs a modem component (wired or wireless network
+# card) present -- no separate networking package/daemon to install.
 
 oppm install oc-sas-ied      # on an IED node
 cp /etc/sas-ied.cfg.example /etc/sas-ied.cfg   # edit: logical device, points, I/O bindings
@@ -227,8 +257,7 @@ rc scadad enable
 rc scadad start
 ```
 
-Inspect a running `iedd`/`scadad` with `sas-ctl <status|points|alarms|log [n]>`
-(mirrors OC-IP-Stack's own `ipstack-ctl`).
+Inspect a running `iedd`/`scadad` with `sas-ctl <status|points|alarms|log [n]>`.
 
 ## Install (MineOS: HMI node)
 
@@ -239,8 +268,8 @@ containing `Main.lua` plus an optional `Icon.pic` -- see
 `sas/sbo.lua`, `sas/model.lua`, `sas/config.lua`, `sas/util.lua` alongside
 it somewhere MineOS's `require()` can resolve (oppm can't install into a
 MineOS filesystem, so this is a manual copy, not `oppm install`). Copy
-`etc/sas-hmi.cfg.example` to `/etc/sas-hmi.cfg` and edit it (SCADA
-address/port, operator name).
+`etc/sas-hmi.cfg.example` to `/etc/sas-hmi.cfg` and edit it (SCADA's
+name, operator name).
 
 `mineos/SAS-HMI.app/Main.lua`'s `GUI.*`/`system.*`/`event.*` calls
 (`system.addWindow`, `GUI.titledWindow`, `GUI.addBackgroundContainer`,
@@ -259,28 +288,30 @@ since the wiki doesn't document them: `Icon.pic`'s exact pixel
 format/dimensions, and the title bar's exact height in rows (`Main.lua`'s
 `TITLE_HEIGHT` is an approximation) -- both cosmetic, not structural.
 
-**Known risk:** whether OC-IP-Stack's `ipstackd`/`require("ipstack.socket")`
-runs cleanly under MineOS (a distinct OS from OpenOS, with its own
-filesystem/kernel implementation) is unverified from this development
-environment -- this is a transport-layer question, unrelated to the GUI
-API points above. Per direction, the HMI is built assuming it works the
-same way it does under OpenOS/SCADA; verify this on first real deployment.
-If it does not port cleanly, the fallback is a small headless OpenOS
-"gateway" machine running `ipstackd` + a thin bridge, networked to the
-MineOS machine, so the HMI's `sas/proto/mmsclient.lua` and `sas/model.lua`
-code needs no changes -- only the transport glue moves.
+**Known risk:** whether `component.modem`/`event.listen("modem_message",
+...)` (`sas/proto/netmsg.lua`) behaves identically under MineOS (a
+distinct OS from OpenOS, with its own filesystem/kernel implementation)
+as under OpenOS is unverified from this development environment -- this
+is a transport-layer question, unrelated to the GUI API points above. Per
+direction, the HMI is built assuming it works the same way it does under
+OpenOS/SCADA; verify this on first real deployment. If it does not port
+cleanly, the fallback is a small headless OpenOS "gateway" machine running
+a thin bridge, networked to the MineOS machine, so the HMI's
+`sas/proto/mmsclient.lua` and `sas/model.lua` code needs no changes --
+only the transport glue moves.
 
 ## Protocol summary
 
 See `sas/proto/messages.lua` for the full message catalog (`get-model`,
 `read`, `subscribe`/`report`, `select`/`operate`/`cancel`, `alarm-list`/
-`alarm-ack`, `history-query`, `heartbeat`). TCP messages are length-prefixed
-(`sas/proto/framing.lua`). GOOSE (`sas/proto/goose.lua`) is multicast
-(`ipstack.socket.multicast()`), one shared group per station (`goose.group`
-in both `sas-ied.cfg` and `sas-scada.cfg`, default `"255.10"`), still
-carrying the same `stNum`/`sqNum` change/retransmit-burst-then-heartbeat
-model. Every IED both publishes and subscribes (for peer interlocking,
-below); SCADA only subscribes.
+`alarm-ack`, `history-query`, `heartbeat`). Each message is one modem
+unicast datagram (`sas/proto/netmsg.lua`, `sas/proto/mmsclient.lua`) --
+no stream framing needed, since a modem message is already one discrete
+unit. GOOSE (`sas/proto/goose.lua`) rides a modem *broadcast*, one shared
+port per station (`goose.port` in both `sas-ied.cfg` and `sas-scada.cfg`,
+default `8104`), still carrying the same `stNum`/`sqNum`
+change/retransmit-burst-then-heartbeat model. Every IED both publishes
+and subscribes (for peer interlocking, below); SCADA only subscribes.
 
 ## Peer interlocking
 
@@ -316,21 +347,22 @@ same as before).
   `component.list()`/`component.proxy(addr).getMethods()` against your
   actual modpack's OpenComputers build, and set each gauge's in-world
   scale dial to match the configured `deadband`.
-- **`ipstackd`-under-MineOS compatibility** and two cosmetic MineOS
+- **Modem transport under MineOS compatibility** and two cosmetic MineOS
   details (`Icon.pic` format, exact title bar height) -- see above. The
   MineOS GUI API calls themselves are no longer a guess (cross-checked
-  against MineOS's actual wiki), only whether they've been run against a
-  real MineOS install (see Testing below).
+  against MineOS's actual wiki), only whether `component.modem`/
+  `event.listen` have been run against a real MineOS install (see Testing
+  below).
 - Everything else (protocol, data model, control flow, redstone I/O) was
-  validated by direct code review against OC-IP-Stack's actual source, not
-  its README alone, but none of it has been run inside the actual mod --
+  validated by direct code review against OpenComputers' actual component
+  API documentation, but none of it has been run inside the actual mod --
   see Testing below.
 - **PDIS (distance protection) is not functional** -- config-modeled only.
   See "Protection" above for why (no phase-angle data source).
 - **GOOSE VLAN/priority/MAC/APPID and Sampled Values are descriptive-only**
-  in the SCL/compiler and carry no enforcement -- OC-IP-Stack has no
-  802.1Q/priority-queue concept or process-bus streaming transport
-  underneath `ipstack.socket.multicast()`. See "SCL / Substation
+  in the SCL/compiler and carry no enforcement -- the built-in
+  OpenComputers modem transport underneath has no 802.1Q/priority-queue
+  concept or process-bus streaming capability. See "SCL / Substation
   Configuration Language" above.
 - **One `LDevice` per IED, compiler-enforced.** `tools/scl-compiler/`
   refuses to compile an `IED` with more or fewer than exactly one
@@ -344,8 +376,7 @@ same as before).
 ## Testing
 
 There is no way to execute `component`/`event`/OpenComputers or MineOS APIs
-outside the actual game (the same limitation OC-IP-Stack's own README
-documents). Every file was syntax-checked with `luac5.3 -p` (Lua 5.3,
+outside the actual game. Every file was syntax-checked with `luac5.3 -p` (Lua 5.3,
 matching OpenComputers' Lua version); `.luacheckrc` declares the OC/OpenOS
 globals this codebase uses. `sas/protection/{curves,ptoc,pdif}.lua` have
 zero OC-API coupling (no `component`/`event`) and are genuinely
@@ -359,18 +390,21 @@ tool's README.
 Manual/in-game (or [OCEmu](https://github.com/zenith391/OCEmu)) test
 runbook, in order:
 
-1. **Bring-up + model discovery.** Two OpenOS machines with `ipstackd`
-   running; `iedd` on node A (one `XCBR` bound to redstone, one `MMXU`
-   bound to a Create:EE meter); `scadad` on node B pointed at A via
-   `sas-scada.cfg`. `sas-ctl status`/`sas-ctl points` on B should show A's
-   full point list without it being hand-configured in `sas-scada.cfg`.
+1. **Bring-up + name discovery + model discovery.** Two OpenOS machines,
+   each with a modem component; `iedd` on node A (`iedName = "IED-BRK1"`,
+   one `XCBR` bound to redstone, one `MMXU` bound to a Create:EE meter);
+   `scadad` on node B with `sas-scada.cfg`'s `ieds = {{ name =
+   "IED-BRK1" }}` (no address). Confirm B's SCADA resolves A's modem
+   address via a "who-is" broadcast (no address hand-configured anywhere),
+   then `sas-ctl status`/`sas-ctl points` on B should show A's full point
+   list without it being hand-configured in `sas-scada.cfg`.
 2. **Status change -> GOOSE -> aggregate -> historian.** Toggle the
    redstone input feeding `XCBR1.Pos`. Confirm a GOOSE datagram fires
    within the first `burstIntervalsSec` entry, `sas-ctl points` on B
    reflects the new value, and a line is appended under
    `historian.dir` on B. GOOSE now needs zero per-IED peer configuration
-   on SCADA beyond `goose.group` matching every IED's -- confirm SCADA
-   receives A's GOOSE purely by having joined the same group, with no
+   on SCADA beyond `goose.port` matching every IED's -- confirm SCADA
+   receives A's GOOSE purely by having that port open, with no
    `sas-scada.cfg` entry naming A as a GOOSE source.
 3. **MV deadband behavior.** Drive the bound meter's value past
    `deadband`; confirm a report/GOOSE fires. Wiggle it by less than
@@ -383,7 +417,7 @@ runbook, in order:
    `pulseMs`; confirm an un-operated reservation auto-expires
    (`sbo.timeoutSec`) and becomes selectable again.
 5. **Peer interlock.** Two IED nodes (A = `IED-BRK1`, B = `IED-BRK2`),
-   both joined to the same `goose.group`, each publishing its own
+   both with the same `goose.port` open, each publishing its own
    `XCBR1.Pos` status as GOOSE, with A configured with an `interlocks`
    rule blocking `XCBR1.PosCtl = "closed"` (the control point -- not the
    status point of the same name, see `sas-ied.cfg.example`'s
@@ -429,12 +463,15 @@ runbook, in order:
    appears via `sas-ctl alarms`/`alarm-list`, ack it via `alarm-ack`,
    confirm it clears when the condition resolves, and confirm a
    not-yet-acked alarm that clears stays visible until acked.
-10. **Comm loss/recovery.** Stop `ipstackd` (or unplug the modem) on IED A.
-   Confirm SCADA raises a `COMM_<iedName>` alarm (TCP loss) and, after
-   `gooseStaleAfterSec`, a `GOOSE_<iedName>` alarm. Restart; confirm
-   reconnect, `get-model` + `subscribe` re-run, and a full resync --
-   without manually restarting `scadad`.
-11. **HMI.** Before GUI polish: confirm `require("ipstack.socket")` and a
-   `select`/`operate` round trip work from a minimal script under real
-   MineOS (the risk noted above). Then exercise the mimic diagram,
-   control dialog, alarm panel/ack, and history query end to end.
+10. **Comm loss/recovery.** Unplug/remove IED A's modem (or `rc iedd
+   stop`). Confirm SCADA raises a `COMM_<iedName>` alarm (mmsclient's
+   retry limit exhausted) and, after `gooseStaleAfterSec`, a
+   `GOOSE_<iedName>` alarm. Restart; confirm reconnect (fresh name
+   discovery, since the modem's address may have changed), `get-model` +
+   `subscribe` re-run, and a full resync -- without manually restarting
+   `scadad`.
+11. **HMI.** Before GUI polish: confirm `component.modem`/
+   `event.listen("modem_message", ...)` and a `select`/`operate` round
+   trip work from a minimal script under real MineOS (the risk noted
+   above). Then exercise the mimic diagram, control dialog, alarm
+   panel/ack, and history query end to end.

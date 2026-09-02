@@ -207,12 +207,9 @@ def _build_bay(vl_elem, bay: BayGroup, node_paths):
 def _build_communication(root, station: Station, mac_appid_index: Dict[str, int]):
     comm = _el(root, "Communication")
     subnet = _el(comm, "SubNetwork", {"name": "StationBus", "type": "8-MMS",
-                                       "desc": "Shared GOOSE multicast group + MMS-lite station LAN"})
+                                       "desc": "Shared GOOSE broadcast port + MMS-lite station LAN"})
     priv = _private(subnet)
-    _oc_el(priv, "transport", {
-        "gooseGroup": station.network.goose_group,
-        "gooseGroupPort": station.network.goose_group_port,
-    })
+    _oc_el(priv, "transport", {"goosePort": station.network.goose_port})
 
     for i, breaker in enumerate(station.all_breakers(), start=1):
         _build_connected_ap_breaker(subnet, station, breaker, i)
@@ -226,10 +223,6 @@ def _build_communication(root, station: Station, mac_appid_index: Dict[str, int]
 def _build_connected_ap_breaker(subnet, station: Station, breaker: Breaker, index: int):
     net = station.network
     cap = _el(subnet, "ConnectedAP", {"iedName": breaker.name, "apName": "AP1"})
-    priv = _private(cap)
-    _oc_el(priv, "mmsAddress", {
-        "address": naming.mms_address(net.mms_subnet, net.mms_host_start_breakers + index - 1),
-    })
     gse = _el(cap, "GSE", {"ldInst": "LD0", "cbName": "gcbGoose1"})
     addr = _el(gse, "Address")
     _el(addr, "P", {"type": "MAC-Address"}, text=naming.mac_address(net.mac_prefix, index))
@@ -243,11 +236,7 @@ def _build_connected_ap_breaker(subnet, station: Station, breaker: Breaker, inde
 def _build_connected_ap_transformer(subnet, station: Station, xfmr: Transformer, mac_appid_idx: int):
     net = station.network
     cap = _el(subnet, "ConnectedAP", {"iedName": xfmr.name, "apName": "AP1"})
-    priv = _private(cap)
     xfmr_index = station.transformers.index(xfmr) + 1
-    _oc_el(priv, "mmsAddress", {
-        "address": naming.mms_address(net.mms_subnet, net.mms_host_start_transformers + xfmr_index - 1),
-    })
     gse = _el(cap, "GSE", {"ldInst": "LD0", "cbName": "gcbGoose1"})
     addr = _el(gse, "Address")
     _el(addr, "P", {"type": "MAC-Address"}, text=naming.mac_address(net.mac_prefix, mac_appid_idx))
@@ -266,14 +255,10 @@ def _build_connected_ap_transformer(subnet, station: Station, xfmr: Transformer,
 
 
 def _build_connected_ap_scada(subnet, station: Station):
-    net = station.network
-    cap = _el(subnet, "ConnectedAP", {"iedName": station.scada.ied_name, "apName": "AP1"})
-    if net.scada_mms_host is not None:
-        priv = _private(cap)
-        _oc_el(priv, "mmsAddress", {"address": naming.mms_address(net.mms_subnet, net.scada_mms_host)})
-    # else: bare <ConnectedAP/>, matching switchyard.scd -- SCADA never
-    # publishes GOOSE, so it needs no GSE, and gets no mmsAddress unless
-    # the user explicitly opted it into one.
+    _el(subnet, "ConnectedAP", {"iedName": station.scada.ied_name, "apName": "AP1"})
+    # Bare <ConnectedAP/>, matching switchyard.scd -- SCADA never publishes
+    # GOOSE, so it needs no GSE, and no address of any kind: every node
+    # resolves peers by name at runtime (sas/proto/discovery.lua).
 
 
 # --------------------------------------------------------------------

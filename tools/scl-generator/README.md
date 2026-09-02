@@ -150,8 +150,7 @@ wrote etc/generated/sas-ied-cb1.cfg
    the whole station, not per breaker/transformer. The differential-
    protection turns-ratio `scale` is always computed automatically
    (`HV_kV / LV_kV`) -- never asked.
-4. GOOSE/network defaults (multicast group/port, MMS addressing, MAC/
-   APPID/VLAN, GOOSE timing).
+4. GOOSE/network defaults (broadcast port, MAC/APPID/VLAN, GOOSE timing).
 5. IED settings defaults (tick interval, integrity, GOOSE stale-after,
    ports).
 6. SCADA settings (IED name, historian, auto-generated alarms).

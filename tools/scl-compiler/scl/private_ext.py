@@ -10,9 +10,7 @@ functions build dicts shaped exactly like.
 
 Type coercion is deliberately explicit per attribute (`_attrs(elem, keys,
 numeric=...)`), NOT guessed from content -- a blind "looks like a number ->
-float" rule silently corrupts values like a gooseGroup/mmsAddress
-"255.10"/"1.10" (an OC-IP-Stack subnet.host string, not a decimal) into
-255.1/1.1.
+float" rule would silently corrupt a genuinely string-typed field.
 """
 
 from .parse import oc_q, find_private
@@ -71,7 +69,7 @@ _PDIF_INPUT_NUMERIC = frozenset({"scale"})
 _PDIS_NUMERIC = frozenset({
     "zone1ReachOhms", "zone1DelaySec", "zone2ReachOhms", "zone2DelaySec",
 })
-_TRANSPORT_NUMERIC = frozenset({"gooseGroupPort"})
+_TRANSPORT_NUMERIC = frozenset({"goosePort"})
 _REPORT_SETTINGS_NUMERIC = frozenset({"periodSec"})
 _HISTORIAN_NUMERIC = frozenset({"maxBytes", "maxFiles"})
 
@@ -178,10 +176,12 @@ def ln0_private(ln0_elem):
 
 
 def subnetwork_private(subnetwork_elem):
-    """SubNetwork/Private/oc:transport -> {gooseGroup=..., gooseGroupPort=...} or {}.
+    """SubNetwork/Private/oc:transport -> {goosePort=...} or {}.
 
-    gooseGroup is an OC-IP-Stack "subnet.host" string (e.g. "255.10"), NOT
-    a decimal -- must stay a string, never numeric-coerced.
+    goosePort is the OpenComputers modem port every IED/SCADA broadcasts/
+    listens for GOOSE on -- the port number itself is the "group" (see
+    sas/proto/netmsg.lua's header), so unlike OC-IP-Stack's addressed
+    multicast groups there is no separate group address to carry here.
     """
     priv = find_private(subnetwork_elem)
     if priv is None:
@@ -189,7 +189,7 @@ def subnetwork_private(subnetwork_elem):
     transport = priv.find(oc_q("transport"))
     if transport is None:
         return {}
-    return _attrs(transport, ["gooseGroup", "gooseGroupPort"], numeric=_TRANSPORT_NUMERIC)
+    return _attrs(transport, ["goosePort"], numeric=_TRANSPORT_NUMERIC)
 
 
 def report_control_private(rc_elem):
@@ -201,26 +201,6 @@ def report_control_private(rc_elem):
     if settings is None:
         return {}
     return _attrs(settings, ["periodSec"], numeric=_REPORT_SETTINGS_NUMERIC)
-
-
-def connected_ap_private(connectedap_elem):
-    """ConnectedAP/Private/oc:mmsAddress -> {address=...} or {}.
-
-    Carries this IED's OC-IP-Stack "subnet.host" address for the MMS-lite
-    TCP link -- real SCL's Address/P[@type="IP"] is IPv4-dotted-quad only
-    (see tP_IP's pattern restriction in the vendored schema) and doesn't
-    fit OC-IP-Stack's informal subnet.host addressing, so this stays a
-    Private field rather than a misuse of the real IP P-element. `address`
-    is a string ("1.10"), never numeric-coerced -- same reasoning as
-    subnetwork_private's gooseGroup.
-    """
-    priv = find_private(connectedap_elem)
-    if priv is None:
-        return {}
-    addr_elem = priv.find(oc_q("mmsAddress"))
-    if addr_elem is None:
-        return {}
-    return _attrs(addr_elem, ["address"])
 
 
 def scada_private(ln0_elem):

@@ -22,7 +22,7 @@ for .cfg generation.
 from .parse import q, oc_q, children, child, find_all
 from .private_ext import (
     point_private, ln0_private, subnetwork_private, report_control_private,
-    connected_ap_private, scada_private, gse_timing_private,
+    scada_private, gse_timing_private,
 )
 
 CDC_TO_TYPE = {
@@ -179,13 +179,11 @@ def _map_goose(root_elem, ied_elem, ied_name, ld_inst, ln0_elem):
 
     sn_elem, ap_elem = _find_subnetwork_and_ap(root_elem, ied_name)
     transport = subnetwork_private(sn_elem)
-    if "gooseGroup" not in transport:
+    if "goosePort" not in transport:
         raise MappingError(
-            "SubNetwork '%s' has no Private/oc:transport/@gooseGroup" % sn_elem.get("name")
+            "SubNetwork '%s' has no Private/oc:transport/@goosePort" % sn_elem.get("name")
         )
-    goose_cfg = {"group": transport["gooseGroup"]}
-    if "gooseGroupPort" in transport:
-        goose_cfg["port"] = transport["gooseGroupPort"]
+    goose_cfg = {"port": transport["goosePort"]}
 
     gse_elem = None
     for gse in children(ap_elem, "GSE"):
@@ -322,8 +320,9 @@ def map_scada(root_elem, ied_elem):
     """Map the <IED type="SCADA"> element to its sas-scada.cfg dict.
 
     `ieds[]` is derived from every OTHER IED sharing a SubNetwork with this
-    one -- its `ip`/`port` come from THAT peer IED's own ConnectedAP
-    Private/oc:mmsAddress and LN0 Private/oc:iedSettings/@mmsPort.
+    one -- just its `name` (see sas/proto/discovery.lua: SCADA resolves
+    each configured IED's modem address/port at runtime, so nothing else
+    needs to be carried through from SCL).
     """
     ld_elem = _find_ldevice(ied_elem)
     ln0 = ld_elem.find(q("LN0"))
@@ -332,22 +331,20 @@ def map_scada(root_elem, ied_elem):
     scada_ext = scada_private(ln0)
 
     cfg = {}
+    cfg["scadaName"] = ied_elem.get("name")
     cfg["hms"] = {"port": settings.get("hmsPort", 8103)}
 
     # SCADA never publishes GOOSE (no GSEControl of its own -- it only
     # subscribes), so unlike a breaker/protection IED it can't go through
-    # _map_goose (which resolves group/port via a GSEControl<->GSE join).
-    # It only needs group/port, read directly off its SubNetwork.
+    # _map_goose (which resolves the port via a GSEControl<->GSE join). It
+    # only needs the port, read directly off its SubNetwork.
     sn_elem, _ = _find_subnetwork_and_ap(root_elem, ied_elem.get("name"))
     transport = subnetwork_private(sn_elem)
-    if "gooseGroup" not in transport:
+    if "goosePort" not in transport:
         raise MappingError(
-            "SubNetwork '%s' has no Private/oc:transport/@gooseGroup" % sn_elem.get("name")
+            "SubNetwork '%s' has no Private/oc:transport/@goosePort" % sn_elem.get("name")
         )
-    cfg["goose"] = {
-        "port": transport.get("gooseGroupPort", 8104),
-        "group": transport["gooseGroup"],
-    }
+    cfg["goose"] = {"port": transport["goosePort"]}
 
     for key in (
         "tickIntervalSec", "resyncSec", "connectTimeoutSec",
@@ -368,20 +365,10 @@ def map_scada(root_elem, ied_elem):
                 break
         if peer_ied is None or peer_ied.get("type") == "SCADA":
             continue
-        peer_ld = _find_ldevice(peer_ied)
-        peer_ln0 = peer_ld.find(q("LN0"))
-        peer_settings = ln0_private(peer_ln0)["iedSettings"]
-        mms_addr = connected_ap_private(ap)
-        if "address" not in mms_addr:
-            raise MappingError(
-                "peer IED '%s' ConnectedAP has no Private/oc:mmsAddress/@address "
-                "(needed for SCADA's ieds[].ip)" % peer_name
-            )
-        ieds.append({
-            "name": peer_name,
-            "ip": mms_addr["address"],
-            "port": peer_settings.get("mmsPort", 8102),
-        })
+        # Just the name -- sas/proto/discovery.lua resolves it to a modem
+        # address/port at runtime, so no ConnectedAP address/port needs to
+        # be carried through from SCL at all.
+        ieds.append({"name": peer_name})
     cfg["ieds"] = ieds
 
     if scada_ext["historian"]:

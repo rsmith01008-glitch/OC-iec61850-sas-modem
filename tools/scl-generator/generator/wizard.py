@@ -179,14 +179,11 @@ def _collect_protection_defaults() -> ProtectionDefaults:
 
 def _collect_network_defaults() -> NetworkDefaults:
     print("\n--- GOOSE / network defaults ---")
-    goose_group = prompts.ask_str("GOOSE multicast group (subnet.host)", default="255.10")
-    goose_group_port = prompts.ask_int("GOOSE port", default=8104, min_value=1)
-    mms_subnet = prompts.ask_int("MMS subnet", default=1, min_value=0)
-    mms_host_start_breakers = prompts.ask_int("First MMS host number for breaker IEDs", default=11, min_value=0)
-    mms_host_start_transformers = prompts.ask_int("First MMS host number for transformer IEDs", default=20, min_value=0)
-    scada_mms_host = None
-    if prompts.ask_yes_no("Give SCADA its own oc:mmsAddress/GSE binding?", default=False):
-        scada_mms_host = prompts.ask_int("SCADA's MMS host number", default=1, min_value=0)
+    # The OpenComputers modem port every IED/SCADA broadcasts/listens for
+    # GOOSE on -- the port number itself is the "group" (see
+    # sas/proto/netmsg.lua), so unlike this project's earlier OC-IP-Stack
+    # transport there's no separate multicast group address to ask for.
+    goose_port = prompts.ask_int("GOOSE port", default=8104, min_value=1)
     mac_prefix = prompts.ask_str("MAC address prefix", default="01-0C-CD-01-00-")
     appid_base = prompts.ask_int("APPID base number", default=1, min_value=0)
     vlan_id = prompts.ask_str("VLAN ID", default="000")
@@ -195,10 +192,7 @@ def _collect_network_defaults() -> NetworkDefaults:
     gse_min_time_ms = prompts.ask_int("GOOSE MinTime (ms)", default=100, min_value=1)
     gse_max_time_ms = prompts.ask_int("GOOSE MaxTime (ms)", default=5000, min_value=1)
     return NetworkDefaults(
-        goose_group=goose_group, goose_group_port=goose_group_port, mms_subnet=mms_subnet,
-        mms_host_start_breakers=mms_host_start_breakers,
-        mms_host_start_transformers=mms_host_start_transformers,
-        scada_mms_host=scada_mms_host, mac_prefix=mac_prefix, appid_base=appid_base,
+        goose_port=goose_port, mac_prefix=mac_prefix, appid_base=appid_base,
         vlan_id=vlan_id, vlan_priority_breaker=vlan_priority_breaker,
         vlan_priority_transformer=vlan_priority_transformer,
         gse_min_time_ms=gse_min_time_ms, gse_max_time_ms=gse_max_time_ms,

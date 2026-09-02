@@ -7,32 +7,34 @@
 -- built-in defaults in sas/ied/engine.lua. Restart after editing:
 -- rc iedd restart
 --
--- Requires ipstackd (OC-IP-Stack) already configured and running on this
--- machine -- see /etc/ipstack.cfg.example. iedd will refuse to start if
--- ipstackd is not running.
+-- Requires a modem component on this machine (wired network card or
+-- wireless network card -- either works identically here, see
+-- sas/proto/netmsg.lua). No separate networking daemon/config needed --
+-- iedd opens the ports below directly on the built-in modem. `iedName`
+-- below is how a SCADA finds this IED at runtime (sas/proto/discovery.lua
+-- broadcasts "who-is <name>" and this IED answers); there is no address
+-- to configure.
 {
   -- Must match this IED's `name` entry in every SCADA that talks to it
-  -- (sas-scada.cfg's `ieds` list) -- used both to build fully-qualified
-  -- point references and to stamp published GOOSE datagrams.
+  -- (sas-scada.cfg's `ieds` list) -- used to build fully-qualified point
+  -- references, stamp published GOOSE datagrams, and answer discovery
+  -- queries.
   iedName = "IED-BRK1",
 
   -- IEC 61850-style logical device name for this IED.
   logicalDevice = "LD0",
 
-  -- MMS-lite TCP server port (get-model/read/subscribe/select/operate/...).
+  -- MMS-lite server port (get-model/read/subscribe/select/operate/...),
+  -- opened on this machine's modem.
   mms = { port = 8102 },
 
   goose = {
+    -- Modem port this IED broadcasts/listens for GOOSE on. Must exactly
+    -- match every other IED's goose.port and the SCADA's goose.port in
+    -- sas-scada.cfg -- the port number itself is the "group": every node
+    -- that has it open hears every other node's broadcasts on it, no
+    -- join/leave step needed (see sas/proto/netmsg.lua).
     port = 8104,
-    -- Shared multicast group this IED joins to publish AND subscribe
-    -- GOOSE -- a "subnet.host" address in OC-IP-Stack's reserved
-    -- multicast subnet (255, ip.MULTICAST_SUBNET). Must exactly match
-    -- every other IED's goose.group and the SCADA's goose.group in
-    -- sas-scada.cfg -- there is one shared group for the whole station
-    -- bus, not one per pair of peers. No per-peer address list needed
-    -- (unlike a plain unicast/UDP fallback) -- every IED that joins this
-    -- group hears every other IED's publications automatically.
-    group = "255.10",
     -- Fast retransmit burst (seconds after each real dataset change)...
     burstIntervalsSec = { 0.2, 0.5, 1, 2 },
     -- ...then settle to this steady heartbeat for liveness.

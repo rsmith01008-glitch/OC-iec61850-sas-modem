@@ -87,8 +87,10 @@ exact schema element/attribute names this was cross-checked against)
   `DOI/Private/oc:point`. A point's `goose` publish flag comes from real
   SCL, not `Private`: true iff that `LN.doName` appears in the
   `DataSet/FCDA[]` referenced by the LDevice's `GSEControl@datSet`.
-- GOOSE transport (`goose.group`/`goose.port`): resolved once per IED via
-  its `SubNetwork/Private/oc:transport`, joined to that IED's own
+- GOOSE transport (`goose.port` -- the OpenComputers modem port every IED
+  broadcasts/listens for GOOSE on; the port number itself is the "group",
+  so there's no separate group address to resolve): resolved once per IED
+  via its `SubNetwork/Private/oc:transport`, joined to that IED's own
   `GSEControl` through the real `GSEControl@name`+`ldInst` ↔
   `ConnectedAP/GSE@cbName`+`@ldInst` relationship. `heartbeatSec` comes
   from `GSE/MaxTime`; `burstIntervalsSec` comes from

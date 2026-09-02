@@ -76,14 +76,11 @@
   </Substation>
 
   <Communication>
-    <SubNetwork name="StationBus" type="8-MMS" desc="Shared GOOSE multicast group + MMS-lite station LAN">
+    <SubNetwork name="StationBus" type="8-MMS" desc="Shared GOOSE broadcast port + MMS-lite station LAN">
       <Private type="oc-iec61850-sas">
-        <oc:transport gooseGroup="255.10" gooseGroupPort="8104"/>
+        <oc:transport goosePort="8104"/>
       </Private>
       <ConnectedAP iedName="CB1" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.11"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-01</P>
@@ -96,9 +93,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB2" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.12"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-02</P>
@@ -111,9 +105,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB3" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.13"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-03</P>
@@ -126,9 +117,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB4" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.14"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-04</P>
@@ -141,9 +129,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB5" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.15"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-05</P>
@@ -156,9 +141,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB6" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.16"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-06</P>
@@ -171,9 +153,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="XFMR1" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.20"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-20</P>

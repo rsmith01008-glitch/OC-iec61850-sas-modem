@@ -9,9 +9,11 @@
 -- GUI-API.md (object/container/button/text/window/addBackgroundContainer
 -- sections) -- not guessed. Two things remain genuinely unverified since
 -- they aren't in the wiki: Icon.pic's exact pixel format/dimensions (see
--- ICON_NOTE.txt), and whether ipstackd/require("ipstack.socket") itself
--- runs under MineOS at all (a transport-layer question, unrelated to the
--- GUI calls here -- see the MineOS risk note in README.md).
+-- ICON_NOTE.txt), and whether the built-in `component.modem`/
+-- `event.listen("modem_message", ...)` transport (sas/proto/netmsg.lua)
+-- behaves the same under MineOS as under OpenOS (a transport-layer
+-- question, unrelated to the GUI calls here -- see the MineOS risk note
+-- in README.md).
 --
 -- Everything below that ISN'T a GUI/event-loop call (the SCADA protocol
 -- client, the SBO flow, the data model) reuses sas/proto/*, sas/model.lua
@@ -26,7 +28,10 @@ local mmsclient = require("sas.proto.mmsclient")
 
 local CFG_PATH = "/etc/sas-hmi.cfg"
 local DEFAULTS = {
-  scada = { ip = "1.1", port = 8103 },
+  -- Must match the SCADA node's own `scadaName` (sas-scada.cfg) --
+  -- resolved to a modem address/port at runtime via sas.proto.discovery,
+  -- no static address needed.
+  scada = "SCADA",
   operator = "operator1",
   pollIntervalSec = 0.5,
   mimicLayout = {},
@@ -66,7 +71,7 @@ local mimicY = statusY + 2
 local mimicHeight = WIN_HEIGHT - mimicY - 9
 
 local statusText = window:addChild(GUI.text(contentX, statusY, 0xFFFFFF,
-  "SAS HMI -- connecting to " .. cfg.scada.ip .. ":" .. cfg.scada.port .. " ..."))
+  "SAS HMI -- connecting to " .. cfg.scada .. " ..."))
 
 local mimicPanel = window:addChild(GUI.container(contentX, mimicY, contentWidth, mimicHeight))
 
@@ -311,13 +316,13 @@ end
 --- Startup ------------------------------------------------------------
 
 local function connectAndLoadModel()
-  local client, err = mmsclient.connect(cfg.scada.ip, cfg.scada.port, 10)
+  local client, err = mmsclient.connect(cfg.scada, 10)
   if not client then
     statusText.text = "SAS HMI -- connect failed: " .. tostring(err)
     return
   end
   app.client = client
-  statusText.text = "SAS HMI -- connected to " .. cfg.scada.ip .. ":" .. cfg.scada.port
+  statusText.text = "SAS HMI -- connected to " .. cfg.scada
 
   local modelReply, merr = client:request({ type = "get-model" }, 10)
   if not modelReply then

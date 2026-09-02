@@ -9,11 +9,11 @@
 -- control commands are forwarded down to the owning IED. Also runs
 -- alarm evaluation and historian logging.
 local event = require("event")
-local socket = require("ipstack.socket")
+local netmsg = require("sas.proto.netmsg")
+local discovery = require("sas.proto.discovery")
 
 local config = require("sas.config")
 local model = require("sas.model")
-local framing = require("sas.proto.framing")
 local messages = require("sas.proto.messages")
 local goose = require("sas.proto.goose")
 local mmsclient = require("sas.proto.mmsclient")
@@ -26,8 +26,11 @@ local engine = {}
 local CFG_PATH = "/etc/sas-scada.cfg"
 
 local DEFAULTS = {
+  -- Name this SCADA answers "who-is" discovery queries for -- must match
+  -- sas-hmi.cfg's `scada` field on every HMI that talks to it.
+  scadaName = "SCADA",
   hms = { port = 8103 },
-  goose = { port = 8104, group = "255.10" },
+  goose = { port = 8104 },
   tickIntervalSec = 0.2,
   resyncSec = 60,
   connectTimeoutSec = 5,
@@ -42,10 +45,8 @@ engine.state = {
   running = false,
   cfg = nil,
   db = nil,               -- model.newAggregateDatabase()
-  iedClients = {},         -- [iedName] = { cfg={name,ip,port}, client=mmsclient|nil, lastAttemptAt=, modelId=, subId= }
-  mcastSock = nil,       -- ipstack.socket multicast socket, joined to cfg.goose.group
-  hmsListener = nil,
-  hmiClients = {},         -- array of { conn=, reader=, subs=nil|"*"|{[ref]=true} }
+  iedClients = {},         -- [iedName] = { cfg={name}, client=mmsclient|nil, lastAttemptAt=, modelId=, subId= }
+  hmiClients = {},         -- [peerAddress] = { addr=, subs=nil|"*"|{[ref]=true} }
   alarmList = nil,         -- alarms.newActiveList()
   lastResyncAt = nil,
   tickTimerId = nil,
@@ -58,10 +59,9 @@ engine.log = util.makeLogger(engine.state.log, 200)
 
 local function connectIed(iedEntry, now)
   iedEntry.lastAttemptAt = now
-  local client, err = mmsclient.connect(iedEntry.cfg.ip, iedEntry.cfg.port, engine.state.cfg.connectTimeoutSec)
+  local client, err = mmsclient.connect(iedEntry.cfg.name, engine.state.cfg.connectTimeoutSec)
   if not client then
-    engine.log("warn", "scada: connect to %s (%s:%d) failed: %s",
-      iedEntry.cfg.name, iedEntry.cfg.ip, iedEntry.cfg.port, tostring(err))
+    engine.log("warn", "scada: connect to %s failed: %s", iedEntry.cfg.name, tostring(err))
     -- Raise COMM_<name> here too, not just from disconnectIed(): an IED
     -- that fails to connect from the very first attempt (never reaches
     -- pollIedClient) would otherwise retry silently forever with no
@@ -75,7 +75,7 @@ local function connectIed(iedEntry, now)
   aggEntry.connOk = false -- flips true once get-model-reply arrives
   iedEntry.modelId = client:sendRequest({ type = "get-model" })
   alarms.clear(engine.state.alarmList, "COMM_" .. iedEntry.cfg.name, now)
-  engine.log("info", "scada: connecting to %s (%s:%d)", iedEntry.cfg.name, iedEntry.cfg.ip, iedEntry.cfg.port)
+  engine.log("info", "scada: connecting to %s", iedEntry.cfg.name)
 end
 
 local function disconnectIed(iedEntry, now, reason)
@@ -149,7 +149,7 @@ end
 
 local function pollIedClient(iedEntry, now)
   local client = iedEntry.client
-  local ok, err = client:poll()
+  local ok, err = client:poll(now)
   if not ok then
     disconnectIed(iedEntry, now, err)
     return
@@ -201,12 +201,9 @@ end
 --- GOOSE subscriber ------------------------------------------------------------
 
 local function tickGoose(now)
-  while true do
-    local data, srcIp = engine.state.mcastSock:receivefrom(0) -- explicit 0: non-blocking
-    if not data then break end
-
-    local msg, derr = goose.decodeWire(data)
-    if msg and goose.isValid(msg) then
+  for _, item in ipairs(netmsg.drain(engine.state.cfg.goose.port)) do
+    local msg = item.data
+    if goose.isValid(msg) then
       local aggEntry = model.ensureIedEntry(engine.state.db, msg.ied)
       if not aggEntry.gooseState then aggEntry.gooseState = goose.newSubscriberState() end
       goose.recordReceived(aggEntry.gooseState, msg, now)
@@ -224,13 +221,13 @@ local function tickGoose(now)
         end
       end
     else
-      engine.log("warn", "scada: dropped malformed GOOSE datagram from %s: %s", tostring(srcIp), tostring(derr))
+      engine.log("warn", "scada: dropped malformed GOOSE datagram from %s", tostring(item.from))
     end
   end
 
-  -- Staleness check: an IED that stops publishing GOOSE (but whose TCP
-  -- connection may still look fine) needs its own alarm, independent of
-  -- COMM_<iedName>.
+  -- Staleness check: an IED that stops publishing GOOSE (but whose
+  -- MMS-lite request/reply may still look fine) needs its own alarm,
+  -- independent of COMM_<iedName>.
   for iedName, aggEntry in pairs(engine.state.db.ieds) do
     local subState = aggEntry.gooseState
     local staleId = "GOOSE_" .. iedName
@@ -256,12 +253,10 @@ end
 --- HMI-facing server ------------------------------------------------------------
 
 local function sendMsg(client, msg)
-  local frame, err = framing.encode(msg)
-  if not frame then
-    engine.log("warn", "scada: could not encode message: %s", tostring(err))
-    return
+  local ok, err = netmsg.send(client.addr, engine.state.cfg.hms.port, msg)
+  if not ok then
+    engine.log("warn", "scada: could not send to %s: %s", tostring(client.addr), tostring(err))
   end
-  client.conn:send(frame)
 end
 
 local function findOwningIedClient(fullRef)
@@ -404,42 +399,17 @@ local function dispatchHmi(client, msg)
   end
 end
 
-local function acceptHmiClients()
-  local conn = engine.state.hmsListener:accept() -- no timeout arg: single non-blocking check
-  while conn do
-    table.insert(engine.state.hmiClients, { conn = conn, reader = framing.newReader(), subs = nil })
-    conn = engine.state.hmsListener:accept()
-  end
-end
-
+-- Same address-keyed, no-explicit-close model as sas/ied/engine.lua's
+-- serviceRequests -- see that function's header for why stale entries are
+-- deliberately never pruned.
 local function serviceHmiClients()
-  local clients = engine.state.hmiClients
-  local i = 1
-  while i <= #clients do
-    local client = clients[i]
-    local dead = false
-
-    local data, rerr = client.conn:receive(0)
-    if data == nil then
-      dead = true
-    elseif data ~= "" then
-      client.reader:feed(data)
-      while true do
-        local msg, ferr = client.reader:pop()
-        if ferr then dead = true; break end
-        if not msg then break end
-        dispatchHmi(client, msg)
-      end
+  for _, item in ipairs(netmsg.drain(engine.state.cfg.hms.port)) do
+    local client = engine.state.hmiClients[item.from]
+    if not client then
+      client = { addr = item.from, subs = nil }
+      engine.state.hmiClients[item.from] = client
     end
-
-    if not dead and client.conn:state() == "CLOSED" then dead = true end
-
-    if dead then
-      pcall(function() client.conn:close() end)
-      table.remove(clients, i)
-    else
-      i = i + 1
-    end
+    dispatchHmi(client, item.data)
   end
 end
 
@@ -454,7 +424,7 @@ local function deliverHmiReports()
   end)
   if #changed == 0 then return end
 
-  for _, client in ipairs(engine.state.hmiClients) do
+  for _, client in pairs(engine.state.hmiClients) do
     if client.subs then
       local values = {}
       for _, c in ipairs(changed) do
@@ -499,7 +469,7 @@ end
 -- "don't over-engineer for OC scale" design philosophy).
 local function pushAlarmUpdates()
   local arr = alarms.toArray(engine.state.alarmList)
-  for _, client in ipairs(engine.state.hmiClients) do
+  for _, client in pairs(engine.state.hmiClients) do
     if client.subs then
       sendMsg(client, { type = "alarm-update", alarms = arr })
     end
@@ -513,11 +483,11 @@ function engine.tick()
     local now = computer.uptime()
     engine.state._tickNow = now
 
+    discovery.tick(now)
     tickIeds(now)
     tickGoose(now)
     tickAlarms(now)
 
-    acceptHmiClients()
     serviceHmiClients()
     relayControlReplies(now)
     deliverHmiReports()
@@ -550,33 +520,21 @@ function engine.start()
   engine.state.pendingRelays = {}
   engine.state.lastResyncAt = nil
 
-  local mcastSock, merr = socket.multicast()
-  if not mcastSock then
-    engine.log("error", "scada: could not open GOOSE multicast socket: %s (is ipstackd running?)", tostring(merr))
-    return nil, merr
+  -- Fails loudly (no retry loop) if this machine has no modem component
+  -- at all -- matches OC-IP-Stack's own ipstack.socket "never hang on a
+  -- dead daemon" rule.
+  local gok, gerr = netmsg.open(cfg.goose.port)
+  if not gok then
+    engine.log("error", "scada: could not open GOOSE port %d: %s", cfg.goose.port, tostring(gerr))
+    return nil, gerr
   end
-  local jok, jerr = mcastSock:join(cfg.goose.group)
-  if not jok then
-    engine.log("error", "scada: could not join GOOSE group %s: %s", tostring(cfg.goose.group), tostring(jerr))
-    pcall(function() mcastSock:close() end)
-    return nil, jerr
+  local hok, herr = netmsg.open(cfg.hms.port)
+  if not hok then
+    engine.log("error", "scada: could not open HMI-facing port %d: %s", cfg.hms.port, tostring(herr))
+    netmsg.close(cfg.goose.port)
+    return nil, herr
   end
-  local bok, berr = mcastSock:bind(cfg.goose.port)
-  if not bok then
-    engine.log("error", "scada: could not bind GOOSE port %d: %s", cfg.goose.port, tostring(berr))
-    pcall(function() mcastSock:close() end)
-    return nil, berr
-  end
-  engine.state.mcastSock = mcastSock
-
-  local listener, lerr = socket.listen(cfg.hms.port)
-  if not listener then
-    engine.log("error", "scada: could not start HMI-facing listener: %s", tostring(lerr))
-    pcall(function() mcastSock:close() end)
-    engine.state.mcastSock = nil
-    return nil, lerr
-  end
-  engine.state.hmsListener = listener
+  discovery.advertise(cfg.scadaName, cfg.hms.port)
 
   engine.state.tickTimerId = event.timer(cfg.tickIntervalSec, engine.tick, math.huge)
   engine.state.running = true
@@ -597,18 +555,11 @@ function engine.stop()
   for _, iedEntry in pairs(engine.state.iedClients) do
     if iedEntry.client then pcall(function() iedEntry.client:close() end) end
   end
-  for _, client in ipairs(engine.state.hmiClients) do
-    pcall(function() client.conn:close() end)
-  end
   engine.state.hmiClients = {}
 
-  if engine.state.hmsListener then
-    pcall(function() engine.state.hmsListener:close() end)
-    engine.state.hmsListener = nil
-  end
-  if engine.state.mcastSock then
-    pcall(function() engine.state.mcastSock:close() end)
-    engine.state.mcastSock = nil
+  if engine.state.cfg then
+    netmsg.close(engine.state.cfg.goose.port)
+    netmsg.close(engine.state.cfg.hms.port)
   end
 
   engine.state.running = false

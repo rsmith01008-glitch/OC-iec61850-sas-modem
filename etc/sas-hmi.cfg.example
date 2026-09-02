@@ -3,8 +3,10 @@
 -- Copy this file to /etc/sas-hmi.cfg (on the MineOS machine) and edit it.
 -- Plain Lua table literal (serialization.unserialize).
 {
-  -- The SCADA node's MMS-lite server address/port (its `hms.port`).
-  scada = { ip = "1.1", port = 8103 },
+  -- The SCADA node's own name (its sas-scada.cfg `scadaName`) --
+  -- resolved to a modem address/port at runtime via discovery, no
+  -- address to configure.
+  scada = "SCADA",
 
   -- Sent as `clientId`/`operator` on every select/operate/cancel/alarm-ack
   -- -- identifies who issued a control action or acknowledged an alarm.
