@@ -1,0 +1,155 @@
+/* Small hand-written stylesheet -- no framework, matches this repo's
+   general "no dependency where avoidable" convention. */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --card-bg: #ffffff;
+  --border: #d7dbe0;
+  --text: #1c1f24;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --error: #b91c1c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card-bg);
+}
+
+header h1 { margin: 0 0 0.25rem; font-size: 1.25rem; }
+.subtitle { margin: 0; color: var(--muted); font-size: 0.85rem; }
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 480px) 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  align-items: start;
+}
+
+.form-pane { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.card summary { cursor: pointer; font-weight: 600; }
+.card .hint { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+
+.section-header { display: flex; justify-content: space-between; align-items: center; }
+.section-header h2 { margin: 0; font-size: 1rem; }
+
+h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+
+label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.4rem; }
+label input, label select { display: block; width: 100%; margin-top: 0.15rem; }
+label.checkbox { display: flex; align-items: center; gap: 0.4rem; }
+label.checkbox input { width: auto; margin: 0; }
+
+input, select, button {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card-bg);
+  color: var(--text);
+}
+
+button {
+  cursor: pointer;
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+button.remove-vl, button.remove-tap, button.remove-output {
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--border);
+}
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; }
+
+.vl-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.vl-card-header { display: grid; grid-template-columns: 1fr 90px 1fr auto; gap: 0.4rem; align-items: center; }
+.layout-hint { margin: 0.3rem 0; color: var(--muted); font-size: 0.78rem; }
+
+.tap-row {
+  border-top: 1px dashed var(--border);
+  padding-top: 0.4rem;
+  margin-top: 0.4rem;
+  display: grid;
+  grid-template-columns: 1fr 130px auto;
+  gap: 0.4rem;
+  align-items: start;
+}
+.tap-row .xfmr-fields {
+  grid-column: 1 / -1;
+  border-left: 2px solid var(--accent);
+  padding-left: 0.6rem;
+  margin-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.tap-row .error { grid-column: 1 / -1; }
+
+.lv-output-row {
+  display: grid;
+  grid-template-columns: 1fr 110px auto;
+  gap: 0.4rem;
+}
+
+.error { color: var(--error); font-size: 0.78rem; min-height: 1em; }
+.error-text { color: var(--error); }
+
+.preview-pane {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#summary, #diagram-preview {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+#diagram-preview svg { max-width: 100%; height: auto; }
+.placeholder { color: var(--muted); font-style: italic; }
+
+#generate-status p { margin: 0.3rem 0; }
+#generate-status ul { margin: 0.3rem 0; padding-left: 1.2rem; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --card-bg: #1c1f24;
+    --border: #2c3038;
+    --text: #e6e8eb;
+    --muted: #9aa1ac;
+    --accent: #5b8def;
+    --error: #f28b82;
+  }
+  #diagram-preview svg { background: white; border-radius: 4px; }
+}

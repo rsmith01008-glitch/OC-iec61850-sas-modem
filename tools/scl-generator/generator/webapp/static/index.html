@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OC-IEC61850-SAS SCL Generator</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>OC-IEC61850-SAS SCL Generator</h1>
+  <p class="subtitle">Live GUI equivalent of <code>scl_generate.py</code>'s wizard -- same questions, same output, diagram updates as you type.</p>
+</header>
+
+<div class="layout">
+  <form id="station-form" class="form-pane" onsubmit="return false">
+
+    <section class="card">
+      <label>Substation name
+        <input type="text" id="station-name" placeholder="Substation1">
+      </label>
+      <div class="error" data-error-for="name"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Voltage levels</h2>
+        <button type="button" id="add-vl">+ Add voltage level</button>
+      </div>
+      <div id="vl-list"></div>
+    </section>
+
+    <details class="card">
+      <summary>Protection defaults <span class="hint">(applied to every breaker/transformer -- doesn't affect the diagram)</span></summary>
+      <div class="grid">
+        <label>PTOC pickup (amps)<input data-field="protection.ptoc_pickup" type="number" step="any" value="1.2"></label>
+        <label>PTOC curve
+          <select data-field="protection.ptoc_curve" class="ptoc-curve">
+            <option value="IEC_VERY_INVERSE" selected>IEC very inverse</option>
+            <option value="IEC_STANDARD_INVERSE">IEC standard inverse</option>
+            <option value="IEC_EXTREMELY_INVERSE">IEC extremely inverse</option>
+            <option value="IEEE_MOD_INVERSE">IEEE moderately inverse</option>
+            <option value="IEEE_VERY_INVERSE">IEEE very inverse</option>
+            <option value="IEEE_EXTREME_INVERSE">IEEE extremely inverse</option>
+            <option value="DEFINITE_TIME">Definite time (fixed delay, not curve-based)</option>
+          </select>
+        </label>
+        <label class="ptoc-time-multiplier">PTOC time multiplier<input data-field="protection.ptoc_time_multiplier" type="number" step="any" value="0.3"></label>
+        <label class="ptoc-definite-time" hidden>PTOC definite time delay (sec)<input data-field="protection.ptoc_definite_time_sec" type="number" step="any" value="0.5"></label>
+        <label>PTOC reset decay (sec)<input data-field="protection.ptoc_reset_sec" type="number" step="any" value="0.1"></label>
+        <label>PDIF minimum pickup (amps)<input data-field="protection.pdif_min_pickup" type="number" step="any" value="0.2"></label>
+        <label>PDIF restraint slope<input data-field="protection.pdif_restraint_slope" type="number" step="any" value="0.4"></label>
+      </div>
+    </details>
+
+    <details class="card">
+      <summary>GOOSE / network defaults <span class="hint">(doesn't affect the diagram)</span></summary>
+      <div class="grid">
+        <label>GOOSE port<input data-field="network.goose_port" type="number" step="1" value="8104"></label>
+        <label>MAC address prefix<input data-field="network.mac_prefix" type="text" value="01-0C-CD-01-00-"></label>
+        <label>APPID base number<input data-field="network.appid_base" type="number" step="1" value="1"></label>
+        <label>VLAN ID<input data-field="network.vlan_id" type="text" value="000"></label>
+        <label>VLAN priority, breaker IEDs (0-7)<input data-field="network.vlan_priority_breaker" type="number" step="1" min="0" max="7" value="4"></label>
+        <label>VLAN priority, transformer IEDs (0-7)<input data-field="network.vlan_priority_transformer" type="number" step="1" min="0" max="7" value="6"></label>
+        <label>GOOSE MinTime (ms)<input data-field="network.gse_min_time_ms" type="number" step="1" value="100"></label>
+        <label>GOOSE MaxTime (ms)<input data-field="network.gse_max_time_ms" type="number" step="1" value="5000"></label>
+      </div>
+    </details>
+
+    <details class="card">
+      <summary>IED settings defaults <span class="hint">(doesn't affect the diagram)</span></summary>
+      <div class="grid">
+        <label>Tick interval (sec)<input data-field="ied_settings.tick_interval_sec" type="number" step="any" value="0.2"></label>
+        <label>Integrity refresh interval (sec)<input data-field="ied_settings.integrity_sec" type="number" step="1" value="30"></label>
+        <label>GOOSE stale-after (sec)<input data-field="ied_settings.goose_stale_after_sec" type="number" step="1" value="15"></label>
+        <label>MMS port (breaker/transformer IEDs)<input data-field="ied_settings.mms_port" type="number" step="1" value="8102"></label>
+        <label>HMS port (SCADA)<input data-field="ied_settings.hms_port" type="number" step="1" value="8103"></label>
+        <label>SCADA resync interval (sec)<input data-field="ied_settings.resync_sec" type="number" step="1" value="60"></label>
+        <label>SCADA connect timeout (sec)<input data-field="ied_settings.connect_timeout_sec" type="number" step="1" value="5"></label>
+        <label>SCADA reconnect interval (sec)<input data-field="ied_settings.reconnect_interval_sec" type="number" step="1" value="10"></label>
+      </div>
+    </details>
+
+    <details class="card">
+      <summary>SCADA <span class="hint">(doesn't affect the diagram)</span></summary>
+      <div class="grid">
+        <label>SCADA IED name<input data-field="scada.ied_name" type="text" value="SCADA1"></label>
+        <label>Historian directory<input data-field="scada.historian_dir" type="text" value="/var/log/sas-scada"></label>
+        <label>Historian max bytes per file<input data-field="scada.historian_max_bytes" type="number" step="1" value="262144"></label>
+        <label>Historian max files<input data-field="scada.historian_max_files" type="number" step="1" value="5"></label>
+        <label class="checkbox"><input data-field="scada.auto_undervoltage_alarms" type="checkbox" checked class="auto-uv"> Auto-generate per-bus undervoltage alarms</label>
+        <label class="undervoltage-ratio">Undervoltage alarm ratio (of nominal kV)<input data-field="scada.undervoltage_ratio" type="number" step="any" value="0.9"></label>
+        <label class="checkbox"><input data-field="scada.auto_trip_alarms" type="checkbox" checked> Auto-generate a trip alarm per transformer's PDIF.Op</label>
+      </div>
+    </details>
+
+    <section class="card">
+      <h2>Generate</h2>
+      <label>Output directory<input type="text" id="out-dir" value="scl"></label>
+      <button type="button" id="generate-btn">Generate .scd + diagram</button>
+      <label class="checkbox"><input type="checkbox" id="compile-now"> Compile now via tools/scl-compiler</label>
+      <label id="compile-dir-row" hidden>Compile output directory<input type="text" id="compile-dir" value="etc/generated"></label>
+      <div id="generate-status"></div>
+    </section>
+  </form>
+
+  <aside class="preview-pane">
+    <div id="summary"><p class="placeholder">Add a voltage level to see a summary.</p></div>
+    <div id="diagram-preview"><p class="placeholder">Add a voltage level to see the one-line diagram.</p></div>
+  </aside>
+</div>
+
+<template id="vl-template">
+  <div class="vl-card">
+    <div class="vl-card-header">
+      <input type="text" class="vl-name" placeholder="V1">
+      <input type="number" class="vl-kv" placeholder="kV" step="any">
+      <select class="vl-layout">
+        <option value="breaker_and_half">1½-breaker</option>
+        <option value="single_bus">Single/main bus</option>
+        <option value="main_and_transfer">Main-and-transfer bus</option>
+        <option value="ring_bus">Ring bus</option>
+      </select>
+      <button type="button" class="remove-vl">Remove</button>
+    </div>
+    <p class="layout-hint"></p>
+    <div class="error" data-role="vl-error"></div>
+    <div class="tap-list"></div>
+    <button type="button" class="add-tap">+ Add tap</button>
+  </div>
+</template>
+
+<template id="tap-template">
+  <div class="tap-row">
+    <input type="text" class="tap-name" placeholder="Line1">
+    <select class="tap-kind">
+      <option value="line">line</option>
+      <option value="feeder">feeder</option>
+      <option value="transformer">transformer</option>
+    </select>
+    <button type="button" class="remove-tap">Remove</button>
+    <div class="xfmr-fields" hidden>
+      <p class="hint">This transformer's LV side (a simple disconnect-gated output, never another switchyard):</p>
+      <input type="text" class="xfmr-name" placeholder="XFMR1">
+      <input type="number" class="xfmr-lv-kv" placeholder="LV kV" step="any">
+      <div class="lv-output-list"></div>
+      <button type="button" class="add-lv-output">+ Add LV output</button>
+    </div>
+    <div class="error" data-role="tap-error"></div>
+  </div>
+</template>
+
+<template id="lv-output-template">
+  <div class="lv-output-row">
+    <input type="text" class="output-name" placeholder="Feed1">
+    <select class="output-kind">
+      <option value="feeder">feeder</option>
+      <option value="line">line</option>
+    </select>
+    <button type="button" class="remove-output">Remove</button>
+  </div>
+</template>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -63,13 +63,34 @@ pip3 install -r tools/scl-generator/requirements.txt
 python3 tools/scl-generator/scl_generate.py [--out-dir scl/]
 ```
 
-Pure interactive `input()` session -- no CLI flags or answers file in
-this version. Every prompt with a default shown in `[brackets]` accepts
-a blank line to take it, so a minimal single-diameter station is a short
-session. Writes `<substation>.scd` and `<substation>-oneline.svg` into
-`--out-dir` (default `scl/`), XSD-validates the `.scd` against the
-vendored schema, and offers to compile it immediately via the real
-`tools/scl-compiler/scl_compile.py`.
+Interactive `input()` session -- every prompt with a default shown in
+`[brackets]` accepts a blank line to take it, so a minimal
+single-diameter station is a short session. Writes `<substation>.scd`
+and `<substation>-oneline.svg` into `--out-dir` (default `scl/`),
+XSD-validates the `.scd` against the vendored schema, and offers to
+compile it immediately via the real `tools/scl-compiler/scl_compile.py`.
+
+## GUI (live diagram preview)
+
+```
+python3 tools/scl-generator/scl_generate.py --gui [--port 8787] [--out-dir scl/]
+```
+
+Same set of questions as the terminal wizard, as a form in your browser
+(opens automatically), with the one-line diagram redrawing live as you
+add/remove voltage levels and taps or switch a layout kind -- useful for
+the "there are a lot of options, I want to see the effect" case the
+terminal session doesn't give you. A local, 127.0.0.1-only web server
+(`generator/webapp/`, standard library only -- no new dependency),
+stateless: your browser holds the whole in-progress station and the
+server rebuilds it fresh on every change via the exact same pure
+builder functions (`generator/layouts/*`, `generator/diagram/*`) the
+terminal wizard calls, so GUI output is identical to what the wizard
+would produce for the same answers. An invalid card (e.g. an odd tap
+count on a 1½-breaker voltage level) shows an inline error under that
+card without breaking the rest of the preview. Generate writes the same
+`<substation>.scd`/`<substation>-oneline.svg` the terminal wizard does,
+runs the same XSD validation, and has the same "compile now" option.
 
 ## Example session (abridged)
 
@@ -264,3 +285,14 @@ strongest correctness signal: it builds `Station` objects directly (no
 generated output isn't just schema-valid but actually compiles cleanly
 through the existing pipeline, directly parallel to how
 `scl/switchyard.scd` itself was verified.
+
+`tests/test_webapp_formdata.py` covers the GUI's non-interactive
+translator (`generator/webapp/formdata.py`): a valid multi-voltage-level
+station with a transformer tap, per-item error isolation (one invalid
+voltage level or transformer never blocks the rest of the station), and
+that a still-being-typed blank field (a name not yet entered) is skipped
+silently rather than treated as an error. `tests/test_webapp_server.py`
+runs a real instance of `generator/webapp/server.py` on an ephemeral
+localhost port and exercises `/api/preview`/`/api/generate`/the
+overwrite-confirmation flow over real HTTP (stdlib `urllib`, no new test
+dependency).
