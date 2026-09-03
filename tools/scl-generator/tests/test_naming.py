@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from generator.naming import (
     validate_ied_name, validate_identifier, sanitize_identifier,
-    mac_address, appid, mms_address, NameError_,
+    mac_address, appid, NameError_,
 )
 
 
@@ -93,10 +93,6 @@ class TestAddressHelpers(unittest.TestCase):
         self.assertEqual(appid(1, 1), "0001")
         self.assertEqual(appid(1, 6), "0006")
         self.assertEqual(appid(20, 1), "0020")
-
-    def test_mms_address_matches_worked_example(self):
-        self.assertEqual(mms_address(1, 11), "1.11")
-        self.assertEqual(mms_address(1, 20), "1.20")
 
 
 if __name__ == "__main__":

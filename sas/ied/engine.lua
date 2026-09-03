@@ -4,11 +4,11 @@
 -- tick() itself must stay entirely non-blocking (no os.sleep, no
 -- timeoutSec>0 ipstack.socket call), matching daemon.lua's safeTick.
 local event = require("event")
-local socket = require("ipstack.socket")
+local netmsg = require("sas.proto.netmsg")
+local discovery = require("sas.proto.discovery")
 
 local config = require("sas.config")
 local model = require("sas.model")
-local framing = require("sas.proto.framing")
 local messages = require("sas.proto.messages")
 local goose = require("sas.proto.goose")
 local sbo = require("sas.sbo")
@@ -27,7 +27,7 @@ local DEFAULTS = {
   iedName = "IED1",
   logicalDevice = "LD0",
   mms = { port = 8102 },
-  goose = { port = 8104, group = "255.10", burstIntervalsSec = { 0.2, 0.5, 1, 2 }, heartbeatSec = 5 },
+  goose = { port = 8104, burstIntervalsSec = { 0.2, 0.5, 1, 2 }, heartbeatSec = 5 },
   tickIntervalSec = 0.2,
   integritySec = 30,
   -- How long a PEER IED's GOOSE can go without a fresh datagram before
@@ -74,9 +74,7 @@ engine.state = {
   cfg = nil,
   db = nil,
   iedName = nil,
-  listener = nil,
-  clients = {},        -- array of { conn=, reader=, subs=nil|"*"|{[ref]=true} }
-  mcastSock = nil,     -- ipstack.socket multicast socket, joined to cfg.goose.group (publish + subscribe)
+  clients = {},        -- [peerAddress] = { addr=, subs=nil|"*"|{[ref]=true}, rcb=nil }
   gooseState = nil,    -- goose.newPublisher(...)
   peers = {},           -- [peerIedName] = model.ensureGoosePeerEntry(...) -- GOOSE heard from other IEDs, for interlocking
   sbo = nil,
@@ -122,12 +120,10 @@ end
 --- Client connection handling ------------------------------------------------------------
 
 local function sendMsg(client, msg)
-  local frame, err = framing.encode(msg)
-  if not frame then
-    engine.log("warn", "ied: could not encode message: %s", tostring(err))
-    return
+  local ok, err = netmsg.send(client.addr, engine.state.cfg.mms.port, msg)
+  if not ok then
+    engine.log("warn", "ied: could not send to %s: %s", tostring(client.addr), tostring(err))
   end
-  client.conn:send(frame)
 end
 
 local function handleGetModel(client, msg)
@@ -383,42 +379,23 @@ end
 
 --- Tick ------------------------------------------------------------
 
-local function acceptClients()
-  local conn = engine.state.listener:accept() -- no timeout arg: single non-blocking check
-  while conn do
-    table.insert(engine.state.clients, { conn = conn, reader = framing.newReader(), subs = nil })
-    conn = engine.state.listener:accept()
-  end
-end
-
-local function serviceClients()
-  local clients = engine.state.clients
-  local i = 1
-  while i <= #clients do
-    local client = clients[i]
-    local dead = false
-
-    local data, rerr = client.conn:receive(0) -- explicit 0: non-blocking, see sas.proto.mmsclient header
-    if data == nil then
-      dead = true
-    elseif data ~= "" then
-      client.reader:feed(data)
-      while true do
-        local msg, ferr = client.reader:pop()
-        if ferr then dead = true; break end
-        if not msg then break end
-        dispatch(client, msg)
-      end
+-- Every inbound request identifies its sender by modem address (the
+-- closest thing to OC-IP-Stack's per-connection `conn` this connectionless
+-- transport has) -- a client entry is created the first time an address is
+-- heard from, and simply kept (not pruned) for as long as iedd runs: a
+-- SCADA that goes away for good just leaves a harmless, small, unused
+-- subs/rcb entry behind, an acceptable "don't over-engineer for OC scale"
+-- trade-off (same one sas/scada/engine.lua's pushAlarmUpdates makes for
+-- resend-every-tick alarm pushes) rather than inventing a liveness/idle-
+-- timeout protocol this connectionless transport has no built-in notion of.
+local function serviceRequests()
+  for _, item in ipairs(netmsg.drain(engine.state.cfg.mms.port)) do
+    local client = engine.state.clients[item.from]
+    if not client then
+      client = { addr = item.from, subs = nil, rcb = nil }
+      engine.state.clients[item.from] = client
     end
-
-    if not dead and client.conn:state() == "CLOSED" then dead = true end
-
-    if dead then
-      pcall(function() client.conn:close() end)
-      table.remove(clients, i)
-    else
-      i = i + 1
-    end
+    dispatch(client, item.data)
   end
 end
 
@@ -504,7 +481,7 @@ local function deliverRcbReport(client, changedRefs, changeKind, now)
 end
 
 local function deliverReports(changedRefs, changeKind, now)
-  for _, client in ipairs(engine.state.clients) do
+  for _, client in pairs(engine.state.clients) do
     if client.rcb then
       deliverRcbReport(client, changedRefs, changeKind, now)
     elseif client.subs and #changedRefs > 0 then
@@ -542,26 +519,23 @@ local function publishGoose(changedRefs, now)
   end)
   local payload = goose.encode(engine.state.iedName, engine.state.db.ld,
     engine.state.gooseState.stNum, engine.state.gooseState.sqNum, now, values)
-  local wire = goose.encodeWire(payload)
 
-  local ok, serr = engine.state.mcastSock:send(engine.state.cfg.goose.group, engine.state.cfg.goose.port, wire)
+  local ok, serr = netmsg.broadcast(engine.state.cfg.goose.port, payload)
   if not ok then
-    engine.log("warn", "ied: goose multicast send failed: %s", tostring(serr))
+    engine.log("warn", "ied: goose broadcast send failed: %s", tostring(serr))
   end
 end
 
 -- Non-blocking drain of GOOSE heard from other IEDs on the shared
--- multicast group -- used to feed interlockBlocks() above. A multicast
--- send is a real flooded frame this IED will also receive back (see
--- OC-IP-Stack's ip.lua: multicast sends flood every local interface), so
--- this IED's own publications must be explicitly filtered out here.
+-- broadcast port -- used to feed interlockBlocks() above. Unlike
+-- OC-IP-Stack's multicast (which flooded every local interface, including
+-- back to the sender), an OC modem broadcast is never delivered back to
+-- its own sender, but the self-filter below is kept anyway as cheap
+-- defense-in-depth.
 local function receiveGoosePeers(now)
-  while true do
-    local data, srcIp = engine.state.mcastSock:receivefrom(0) -- explicit 0: non-blocking
-    if not data then break end
-
-    local msg, derr = goose.decodeWire(data)
-    if msg and goose.isValid(msg) and msg.ied ~= engine.state.iedName then
+  for _, item in ipairs(netmsg.drain(engine.state.cfg.goose.port)) do
+    local msg = item.data
+    if goose.isValid(msg) and msg.ied ~= engine.state.iedName then
       local peerEntry = model.ensureGoosePeerEntry(engine.state.peers, msg.ied)
       if not peerEntry.gooseState then peerEntry.gooseState = goose.newSubscriberState() end
       goose.recordReceived(peerEntry.gooseState, msg, now)
@@ -573,8 +547,8 @@ local function receiveGoosePeers(now)
         end
         model.setValue(rec, v.v, v.q, now)
       end
-    elseif msg and not goose.isValid(msg) then
-      engine.log("warn", "ied: dropped malformed GOOSE datagram from %s", tostring(srcIp))
+    elseif not goose.isValid(msg) then
+      engine.log("warn", "ied: dropped malformed GOOSE datagram from %s", tostring(item.from))
     end
   end
 end
@@ -676,8 +650,8 @@ function engine.tick()
   local ok, err = pcall(function()
     local now = computer.uptime()
 
-    acceptClients()
-    serviceClients()
+    discovery.tick(now)
+    serviceRequests()
 
     receiveGoosePeers(now)
 
@@ -881,39 +855,21 @@ function engine.start()
     return nil, repErr
   end
 
-  -- Fails loudly (no retry loop) if ipstackd isn't running -- matches
-  -- ipstack.socket's own "never hang on a dead daemon" rule.
-  local listener, lerr = socket.listen(cfg.mms.port)
-  if not listener then
-    engine.log("error", "ied: could not start MMS-lite listener: %s (is ipstackd running?)", tostring(lerr))
-    return nil, lerr
-  end
-  engine.state.listener = listener
-
-  local mcastSock, merr = socket.multicast()
-  if not mcastSock then
-    engine.log("error", "ied: could not open GOOSE multicast socket: %s", tostring(merr))
-    pcall(function() listener:close() end)
-    engine.state.listener = nil
+  -- Fails loudly (no retry loop) if this machine has no modem component
+  -- at all -- matches OC-IP-Stack's own ipstack.socket "never hang on a
+  -- dead daemon" rule.
+  local mok, merr = netmsg.open(cfg.mms.port)
+  if not mok then
+    engine.log("error", "ied: could not open MMS-lite port %d: %s", cfg.mms.port, tostring(merr))
     return nil, merr
   end
-  local jok, jerr = mcastSock:join(cfg.goose.group)
-  if not jok then
-    engine.log("error", "ied: could not join GOOSE group %s: %s", tostring(cfg.goose.group), tostring(jerr))
-    pcall(function() mcastSock:close() end)
-    pcall(function() listener:close() end)
-    engine.state.listener = nil
-    return nil, jerr
+  local gok, gerr = netmsg.open(cfg.goose.port)
+  if not gok then
+    engine.log("error", "ied: could not open GOOSE port %d: %s", cfg.goose.port, tostring(gerr))
+    netmsg.close(cfg.mms.port)
+    return nil, gerr
   end
-  local bok, berr = mcastSock:bind(cfg.goose.port)
-  if not bok then
-    engine.log("error", "ied: could not bind GOOSE port %d: %s", cfg.goose.port, tostring(berr))
-    pcall(function() mcastSock:close() end)
-    pcall(function() listener:close() end)
-    engine.state.listener = nil
-    return nil, berr
-  end
-  engine.state.mcastSock = mcastSock
+  discovery.advertise(cfg.iedName, cfg.mms.port)
 
   engine.state.clients = {}
   engine.state.pulses = {}
@@ -947,7 +903,7 @@ function engine.start()
   return true
 end
 
--- Unregisters the tick timer, closes all connections/sockets. Idempotent.
+-- Unregisters the tick timer, closes the modem ports. Idempotent.
 function engine.stop()
   if not engine.state.running then return true end
 
@@ -956,18 +912,10 @@ function engine.stop()
     engine.state.tickTimerId = nil
   end
 
-  for _, client in ipairs(engine.state.clients) do
-    pcall(function() client.conn:close() end)
-  end
   engine.state.clients = {}
-
-  if engine.state.listener then
-    pcall(function() engine.state.listener:close() end)
-    engine.state.listener = nil
-  end
-  if engine.state.mcastSock then
-    pcall(function() engine.state.mcastSock:close() end)
-    engine.state.mcastSock = nil
+  if engine.state.cfg then
+    netmsg.close(engine.state.cfg.mms.port)
+    netmsg.close(engine.state.cfg.goose.port)
   end
   engine.state.peers = {}
   engine.state.protection = { ptoc = {}, pdif = {} }

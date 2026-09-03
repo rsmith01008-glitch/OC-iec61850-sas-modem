@@ -7,12 +7,9 @@
   <Communication>
     <SubNetwork name="StationBus" type="8-MMS">
       <Private type="oc-iec61850-sas">
-        <oc:transport gooseGroup="255.10" gooseGroupPort="8104"/>
+        <oc:transport goosePort="8104"/>
       </Private>
       <ConnectedAP iedName="BRK1" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.10"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <MinTime unit="s" multiplier="m">100</MinTime>
           <MaxTime unit="s" multiplier="m">5000</MaxTime>

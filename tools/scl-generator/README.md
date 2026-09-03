@@ -150,8 +150,7 @@ wrote etc/generated/sas-ied-cb1.cfg
    the whole station, not per breaker/transformer. The differential-
    protection turns-ratio `scale` is always computed automatically
    (`HV_kV / LV_kV`) -- never asked.
-4. GOOSE/network defaults (multicast group/port, MMS addressing, MAC/
-   APPID/VLAN, GOOSE timing).
+4. GOOSE/network defaults (broadcast port, MAC/APPID/VLAN, GOOSE timing).
 5. IED settings defaults (tick interval, integrity, GOOSE stale-after,
    ports).
 6. SCADA settings (IED name, historian, auto-generated alarms).
@@ -159,8 +158,9 @@ wrote etc/generated/sas-ied-cb1.cfg
 
 ## Auto-derived, not asked
 
-- **Remote trips**: every transformer's differential protection
-  (`PDIF1.Op`) automatically trips every breaker bounding its HV tap --
+- **Remote trips**: every transformer's differential protection (one
+  `remoteTrip[]` rule per phase, `PDIF1A/B/C.Op`) automatically trips
+  every breaker bounding its HV tap --
   mechanically derived from the topology graph, not a judgment call
   (`generator/derive.py`'s `remote_trips_for`). "Bounding" walks straight
   through any isolating disconnects to find the real breaker on each

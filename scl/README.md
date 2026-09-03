@@ -32,27 +32,68 @@ diameter, plus a matching breaker IED per new `CBRn`.
 Isolating the transformer fully requires opening **both** breakers
 bounding each of its taps -- CB2 and CB3 on the HV side (both touch N2),
 CB4 and CB5 on the LV side (both touch N3) -- not just one per side. This
-is why `XFMR1`'s differential trip (`PDIF1.Op`) reaches all four via
-`remoteTrips[]` on those four breaker IEDs, not two.
+is why `XFMR1`'s differential trip reaches all four via `remoteTrips[]`
+on those four breaker IEDs, not two -- one `remoteTrip[]` rule per phase
+per breaker (`PDIF1A/B/C.Op`; see below), not one.
+
+## One-line diagram
+
+`tools/scl-compiler/` also derives the HMI's one-line diagram from this
+file's real topology (`ConductingEquipment`/`Terminal`/`ConnectivityNode`
+connectivity -- see that tool's README's "Diagram emission" section).
+Two things worth knowing about how `switchyard.scd` in particular renders:
+
+- **Zero disconnect symbols.** Every `ConductingEquipment` here is
+  `type="CBR"` (a breaker) -- there is no `type="DIS"` equipment anywhere
+  in this file, so the compiled diagram has an empty `disconnects[]`.
+  Disconnects are drawn as static/neutral tick symbols when present (no
+  live status data exists for them anywhere in this codebase); a `.scd`
+  produced by `tools/scl-generator/` with isolating disconnects added
+  (`generator/layouts/common.py`'s `add_isolating_disconnects`) will show
+  them.
+- **Line/feeder tap glyphs need an extra hint.** N1 (`Line1` tap) and N4
+  (`Feed1` tap) render with a neutral "unknown" tap glyph here, because
+  this file predates the `ConnectivityNode/Private/oc:tap kind="line"|
+  "feeder"` extension `tools/scl-compiler/scl/private_ext.py` reads --
+  tap kind is never guessed from `desc` text (same "not guessed from
+  content" rule as every other `Private` extension in this project).
+  Adding `<Private type="oc-iec61850-sas"><oc:tap kind="line"/></Private>`
+  under N1's `ConnectivityNode` (and `kind="feeder"` under N4's) would
+  enable the filled/hollow-triangle glyph distinction for this file, same
+  as `tools/scl-generator/`-produced `.scd`s already get via their own
+  writer convention. Transformer taps (N2/N3) need no such hint -- they're
+  always identified structurally, from `PowerTransformer/
+  TransformerWinding/Terminal/@connectivityNode`.
 
 ## IEDs
 
 - `CB1`..`CB6`: one per breaker. Own `XCBR1.Pos`/`PosCtl` (redstone),
-  local `MMXU1.Amp`/`Vol` (Create:EE meters), a real-trip `PTOC1`
-  overcurrent scheme, a GOOSE-published `XCBR1.Pos`, and an `rcbStatus1`
-  report. `CB2`/`CB3`/`CB4`/`CB5` additionally carry a `remoteTrip[]`
-  reacting to `XFMR1`'s `PDIF1.Op`. `CB1`/`CB2` and `CB4`/`CB5` each carry
-  one illustrative `interlock[]` (not a complete substation interlock
-  philosophy -- just proof the cross-IED mechanism works).
+  local `MMXU1.AmpA/B/C`/`VolAB/BC/CA` (6 independent Create:EE meters --
+  one per phase current, one per phase-to-phase voltage; a 3-phase
+  circuit needs 3 of each, never one meter standing in for all three), 3
+  real-trip `PTOC1A/B/C` overcurrent schemes (one per phase, matching
+  real numerical relays' separate 50/51-A/B/C elements -- a single-phase-
+  to-ground fault only elevates one phase's current), a GOOSE-published
+  `XCBR1.Pos`, and an `rcbStatus1` report. `CB2`/`CB3`/`CB4`/`CB5`
+  additionally carry 3 `remoteTrip[]` rules (one per `XFMR1` phase's
+  `PDIF1A/B/C.Op` -- any single phase's differential trip must open the
+  breaker). `CB1`/`CB2` and `CB4`/`CB5` each carry one illustrative
+  `interlock[]` (not a complete substation interlock philosophy -- just
+  proof the cross-IED mechanism works).
 - `XFMR1`: dedicated transformer-protection IED. No breaker of its own --
-  its job needs simultaneous HV+LV CT readings (`MMXU1.Amp`/`MMXU2.Amp`),
+  its job needs simultaneous HV+LV CT readings (`MMXU1.AmpA/B/C`/
+  `MMXU2.AmpA/B/C` -- current only, no voltage, unlike a breaker's MMXU),
   which only makes sense co-located on one IED (this codebase's "one IED
   owns its own equipment" pattern, extended here to "protection reads only
-  its own IED's meters"). Runs a real-trip `PDIF1` (magnitude-restrained
-  differential) and an inert `PDIS1` (distance -- config-modeled only, see
-  `sas/protection/pdis.lua`'s header for why: no phase-angle data source).
-  Also carries a bare `RDRE1` (disturbance recorder) LN -- SCL data-model
-  completeness only, not wired to any event-capture code.
+  its own IED's meters"). Runs 3 real-trip `PDIF1A/B/C` schemes
+  (magnitude-restrained differential, one per phase -- each compares that
+  phase's own HV CT against that same phase's own LV CT; pdif.lua has no
+  vector/phase-shift compensation, so pairing anything other than the
+  same phase on both sides would risk a false trip) and an inert `PDIS1`
+  (distance -- config-modeled only, see `sas/protection/pdis.lua`'s
+  header for why: no phase-angle data source). Also carries a bare
+  `RDRE1` (disturbance recorder) LN -- SCL data-model completeness only,
+  not wired to any event-capture code.
 - `SCADA1` (`IED type="SCADA"`): the SCADA concentrator, itself modeled as
   an `IED` per this project's `Private` conventions (see
   `tools/scl-compiler/scl/mapping.py`'s `map_scada`). `ieds[]` is derived
@@ -67,9 +108,9 @@ is why `XFMR1`'s differential trip (`PDIF1.Op`) reaches all four via
 - **Descriptive-only** (present in the SCL for schema-completeness and
   human documentation, not consumed by the compiler or enforced by any
   runtime code): `GSE/Address` MAC-Address/APPID/VLAN-ID/VLAN-PRIORITY
-  (OC-IP-Stack has no 802.1Q/priority-queue concept underneath --
-  see the OC-IP-Stack transport enhancement writeup for what a real
-  implementation would need), the `SampledValueControl`/`SMV` on `XFMR1`
+  (the built-in OpenComputers modem transport underneath -- see
+  `sas/proto/netmsg.lua` -- has no 802.1Q/priority-queue concept), the
+  `SampledValueControl`/`SMV` on `XFMR1`
   (no process-bus streaming transport exists), `GSEControl@securityEnable`
   (always `"None"` -- no GOOSE authentication/encryption is implemented),
   and `RDRE1` (no oscillography capture exists).

@@ -5,7 +5,10 @@
 -- unsolicited "report"/"alarm-update" pushes.
 --
 -- Request -> reply:
---   get-model              -> get-model-reply   {id, ld, points={{ln,doName,type},...}}
+--   get-model              -> get-model-reply   {id, ld, points={{ln,doName,type},...},
+--                                                 diagram=nil|{...}}  -- SCADA only; see
+--                                                 scl/char_layout.py's build_diagram
+--                                                 and sas/hmi/engine.lua
 --   read      {refs}       -> read-reply        {id, values={[ref]={value,quality,t}}}
 --   subscribe {refs|"*"|rcbName} -> subscribe-reply {id, ok, err}
 --   select    {ref}        -> select-reply       {id, ok, token, err}

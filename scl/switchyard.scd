@@ -76,14 +76,11 @@
   </Substation>
 
   <Communication>
-    <SubNetwork name="StationBus" type="8-MMS" desc="Shared GOOSE multicast group + MMS-lite station LAN">
+    <SubNetwork name="StationBus" type="8-MMS" desc="Shared GOOSE broadcast port + MMS-lite station LAN">
       <Private type="oc-iec61850-sas">
-        <oc:transport gooseGroup="255.10" gooseGroupPort="8104"/>
+        <oc:transport goosePort="8104"/>
       </Private>
       <ConnectedAP iedName="CB1" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.11"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-01</P>
@@ -96,9 +93,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB2" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.12"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-02</P>
@@ -111,9 +105,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB3" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.13"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-03</P>
@@ -126,9 +117,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB4" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.14"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-04</P>
@@ -141,9 +129,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB5" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.15"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-05</P>
@@ -156,9 +141,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="CB6" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.16"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-06</P>
@@ -171,9 +153,6 @@
         </GSE>
       </ConnectedAP>
       <ConnectedAP iedName="XFMR1" apName="AP1">
-        <Private type="oc-iec61850-sas">
-          <oc:mmsAddress address="1.20"/>
-        </Private>
         <GSE ldInst="LD0" cbName="gcbGoose1">
           <Address>
             <P type="MAC-Address">01-0C-CD-01-00-20</P>
@@ -207,7 +186,13 @@
               <oc:iedSettings tickIntervalSec="0.2" integritySec="30" gooseStaleAfterSec="15" mmsPort="8102"/>
               <oc:interlock id="CB1_VS_CB2" localRef="XCBR1.PosCtl" blockValue="closed"
                   peerIed="CB2" peerRef="XCBR1.Pos" condition="eq" peerValue="closed"/>
-              <oc:ptocScheme name="PTOC1" input="MMXU1.Amp" trip="XCBR1.PosCtl"
+              <oc:ptocScheme name="PTOC1A" input="MMXU1.AmpA" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1B" input="MMXU1.AmpB" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1C" input="MMXU1.AmpC" trip="XCBR1.PosCtl"
                   pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
                   resetSec="0.1" respectInterlocks="false"/>
 
@@ -238,17 +223,45 @@
             </DOI>
           </LN>
           <LN prefix="" lnClass="MMXU" inst="1" lnType="MMXU_Basic">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="cb1-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb1-ammeter-a-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
-            <DOI name="Vol">
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb1-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb1-ammeter-c-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolAB">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="2.0">
-                  <oc:meterIo address="cb1-voltmeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb1-voltmeter-ab-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolBC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb1-voltmeter-bc-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolCA">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb1-voltmeter-ca-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
@@ -267,10 +280,20 @@
               <oc:iedSettings tickIntervalSec="0.2" integritySec="30" gooseStaleAfterSec="15" mmsPort="8102"/>
               <oc:interlock id="CB2_VS_CB1" localRef="XCBR1.PosCtl" blockValue="closed"
                   peerIed="CB1" peerRef="XCBR1.Pos" condition="eq" peerValue="closed"/>
-              <oc:ptocScheme name="PTOC1" input="MMXU1.Amp" trip="XCBR1.PosCtl"
+              <oc:ptocScheme name="PTOC1A" input="MMXU1.AmpA" trip="XCBR1.PosCtl"
                   pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
                   resetSec="0.1" respectInterlocks="false"/>
-              <oc:remoteTrip id="XFMR1_DIFF_TRIP" peerIed="XFMR1" peerRef="PDIF1.Op"
+              <oc:ptocScheme name="PTOC1B" input="MMXU1.AmpB" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1C" input="MMXU1.AmpC" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_A" peerIed="XFMR1" peerRef="PDIF1A.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_B" peerIed="XFMR1" peerRef="PDIF1B.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_C" peerIed="XFMR1" peerRef="PDIF1C.Op"
                   condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
             </Private>
             <DataSet name="dsGoose1">
@@ -299,17 +322,45 @@
             </DOI>
           </LN>
           <LN prefix="" lnClass="MMXU" inst="1" lnType="MMXU_Basic">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="cb2-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb2-ammeter-a-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
-            <DOI name="Vol">
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb2-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb2-ammeter-c-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolAB">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="2.0">
-                  <oc:meterIo address="cb2-voltmeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb2-voltmeter-ab-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolBC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb2-voltmeter-bc-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolCA">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb2-voltmeter-ca-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
@@ -327,10 +378,20 @@
             <Private type="oc-iec61850-sas">
               <oc:iedSettings tickIntervalSec="0.2" integritySec="30" gooseStaleAfterSec="15" mmsPort="8102"/>
 
-              <oc:ptocScheme name="PTOC1" input="MMXU1.Amp" trip="XCBR1.PosCtl"
+              <oc:ptocScheme name="PTOC1A" input="MMXU1.AmpA" trip="XCBR1.PosCtl"
                   pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
                   resetSec="0.1" respectInterlocks="false"/>
-              <oc:remoteTrip id="XFMR1_DIFF_TRIP" peerIed="XFMR1" peerRef="PDIF1.Op"
+              <oc:ptocScheme name="PTOC1B" input="MMXU1.AmpB" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1C" input="MMXU1.AmpC" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_A" peerIed="XFMR1" peerRef="PDIF1A.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_B" peerIed="XFMR1" peerRef="PDIF1B.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_C" peerIed="XFMR1" peerRef="PDIF1C.Op"
                   condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
             </Private>
             <DataSet name="dsGoose1">
@@ -359,17 +420,45 @@
             </DOI>
           </LN>
           <LN prefix="" lnClass="MMXU" inst="1" lnType="MMXU_Basic">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="cb3-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb3-ammeter-a-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
-            <DOI name="Vol">
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb3-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb3-ammeter-c-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolAB">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="2.0">
-                  <oc:meterIo address="cb3-voltmeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb3-voltmeter-ab-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolBC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb3-voltmeter-bc-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolCA">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb3-voltmeter-ca-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
@@ -388,10 +477,20 @@
               <oc:iedSettings tickIntervalSec="0.2" integritySec="30" gooseStaleAfterSec="15" mmsPort="8102"/>
               <oc:interlock id="CB4_VS_CB5" localRef="XCBR1.PosCtl" blockValue="closed"
                   peerIed="CB5" peerRef="XCBR1.Pos" condition="eq" peerValue="closed"/>
-              <oc:ptocScheme name="PTOC1" input="MMXU1.Amp" trip="XCBR1.PosCtl"
+              <oc:ptocScheme name="PTOC1A" input="MMXU1.AmpA" trip="XCBR1.PosCtl"
                   pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
                   resetSec="0.1" respectInterlocks="false"/>
-              <oc:remoteTrip id="XFMR1_DIFF_TRIP" peerIed="XFMR1" peerRef="PDIF1.Op"
+              <oc:ptocScheme name="PTOC1B" input="MMXU1.AmpB" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1C" input="MMXU1.AmpC" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_A" peerIed="XFMR1" peerRef="PDIF1A.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_B" peerIed="XFMR1" peerRef="PDIF1B.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_C" peerIed="XFMR1" peerRef="PDIF1C.Op"
                   condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
             </Private>
             <DataSet name="dsGoose1">
@@ -420,17 +519,45 @@
             </DOI>
           </LN>
           <LN prefix="" lnClass="MMXU" inst="1" lnType="MMXU_Basic">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="cb4-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb4-ammeter-a-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
-            <DOI name="Vol">
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb4-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb4-ammeter-c-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolAB">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="2.0">
-                  <oc:meterIo address="cb4-voltmeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb4-voltmeter-ab-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolBC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb4-voltmeter-bc-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolCA">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb4-voltmeter-ca-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
@@ -449,10 +576,20 @@
               <oc:iedSettings tickIntervalSec="0.2" integritySec="30" gooseStaleAfterSec="15" mmsPort="8102"/>
               <oc:interlock id="CB5_VS_CB4" localRef="XCBR1.PosCtl" blockValue="closed"
                   peerIed="CB4" peerRef="XCBR1.Pos" condition="eq" peerValue="closed"/>
-              <oc:ptocScheme name="PTOC1" input="MMXU1.Amp" trip="XCBR1.PosCtl"
+              <oc:ptocScheme name="PTOC1A" input="MMXU1.AmpA" trip="XCBR1.PosCtl"
                   pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
                   resetSec="0.1" respectInterlocks="false"/>
-              <oc:remoteTrip id="XFMR1_DIFF_TRIP" peerIed="XFMR1" peerRef="PDIF1.Op"
+              <oc:ptocScheme name="PTOC1B" input="MMXU1.AmpB" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1C" input="MMXU1.AmpC" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_A" peerIed="XFMR1" peerRef="PDIF1A.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_B" peerIed="XFMR1" peerRef="PDIF1B.Op"
+                  condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
+              <oc:remoteTrip id="XFMR1_DIFF_TRIP_C" peerIed="XFMR1" peerRef="PDIF1C.Op"
                   condition="eq" peerValue="true" localRef="XCBR1.PosCtl" tripValue="open"/>
             </Private>
             <DataSet name="dsGoose1">
@@ -481,17 +618,45 @@
             </DOI>
           </LN>
           <LN prefix="" lnClass="MMXU" inst="1" lnType="MMXU_Basic">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="cb5-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb5-ammeter-a-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
-            <DOI name="Vol">
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb5-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb5-ammeter-c-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolAB">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="2.0">
-                  <oc:meterIo address="cb5-voltmeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb5-voltmeter-ab-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolBC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb5-voltmeter-bc-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolCA">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb5-voltmeter-ca-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
@@ -509,7 +674,13 @@
             <Private type="oc-iec61850-sas">
               <oc:iedSettings tickIntervalSec="0.2" integritySec="30" gooseStaleAfterSec="15" mmsPort="8102"/>
 
-              <oc:ptocScheme name="PTOC1" input="MMXU1.Amp" trip="XCBR1.PosCtl"
+              <oc:ptocScheme name="PTOC1A" input="MMXU1.AmpA" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1B" input="MMXU1.AmpB" trip="XCBR1.PosCtl"
+                  pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
+                  resetSec="0.1" respectInterlocks="false"/>
+              <oc:ptocScheme name="PTOC1C" input="MMXU1.AmpC" trip="XCBR1.PosCtl"
                   pickup="1.2" curve="IEC_VERY_INVERSE" timeMultiplier="0.3"
                   resetSec="0.1" respectInterlocks="false"/>
 
@@ -540,17 +711,45 @@
             </DOI>
           </LN>
           <LN prefix="" lnClass="MMXU" inst="1" lnType="MMXU_Basic">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="cb6-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb6-ammeter-a-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
-            <DOI name="Vol">
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb6-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="cb6-ammeter-c-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolAB">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="2.0">
-                  <oc:meterIo address="cb6-voltmeter-adapter" method="getValue"/>
+                  <oc:meterIo address="cb6-voltmeter-ab-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolBC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb6-voltmeter-bc-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="VolCA">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="2.0">
+                  <oc:meterIo address="cb6-voltmeter-ca-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
@@ -568,15 +767,27 @@
           <LN0 lnClass="LLN0" inst="" lnType="LN0_Basic">
             <Private type="oc-iec61850-sas">
               <oc:iedSettings tickIntervalSec="0.2" integritySec="30" gooseStaleAfterSec="15" mmsPort="8102"/>
-              <oc:pdifScheme name="PDIF1" minPickup="0.2" restraintSlope="0.4" respectInterlocks="false">
-                <oc:input ref="MMXU1.Amp" scale="1.0"/>
-                <oc:input ref="MMXU2.Amp" scale="3.478"/>
+              <oc:pdifScheme name="PDIF1A" minPickup="0.2" restraintSlope="0.4" respectInterlocks="false">
+                <oc:input ref="MMXU1.AmpA" scale="1.0"/>
+                <oc:input ref="MMXU2.AmpA" scale="3.478"/>
+              </oc:pdifScheme>
+              <oc:pdifScheme name="PDIF1B" minPickup="0.2" restraintSlope="0.4" respectInterlocks="false">
+                <oc:input ref="MMXU1.AmpB" scale="1.0"/>
+                <oc:input ref="MMXU2.AmpB" scale="3.478"/>
+              </oc:pdifScheme>
+              <oc:pdifScheme name="PDIF1C" minPickup="0.2" restraintSlope="0.4" respectInterlocks="false">
+                <oc:input ref="MMXU1.AmpC" scale="1.0"/>
+                <oc:input ref="MMXU2.AmpC" scale="3.478"/>
               </oc:pdifScheme>
               <oc:pdisScheme name="PDIS1" zone1ReachOhms="12.5" zone1DelaySec="0" zone2ReachOhms="25" zone2DelaySec="0.3"/>
             </Private>
             <DataSet name="dsStatus1">
-              <FCDA lnClass="MMXU" lnInst="1" doName="Amp" fc="MX"/>
-              <FCDA lnClass="MMXU" lnInst="2" doName="Amp" fc="MX"/>
+              <FCDA lnClass="MMXU" lnInst="1" doName="AmpA" fc="MX"/>
+              <FCDA lnClass="MMXU" lnInst="1" doName="AmpB" fc="MX"/>
+              <FCDA lnClass="MMXU" lnInst="1" doName="AmpC" fc="MX"/>
+              <FCDA lnClass="MMXU" lnInst="2" doName="AmpA" fc="MX"/>
+              <FCDA lnClass="MMXU" lnInst="2" doName="AmpB" fc="MX"/>
+              <FCDA lnClass="MMXU" lnInst="2" doName="AmpC" fc="MX"/>
             </DataSet>
             <ReportControl name="rcbXfmr1" datSet="dsStatus1" confRev="1" bufTime="0">
               <TrgOps dchg="true" qchg="true" gi="true"/>
@@ -588,19 +799,47 @@
             </SampledValueControl>
           </LN0>
           <LN prefix="" lnClass="MMXU" inst="1" lnType="MMXU_Basic" desc="HV-side CT">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="xfmr1-hv-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="xfmr1-hv-ammeter-a-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="xfmr1-hv-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="xfmr1-hv-ammeter-c-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
           </LN>
           <LN prefix="" lnClass="MMXU" inst="2" lnType="MMXU_Basic" desc="LV-side CT">
-            <DOI name="Amp">
+            <DOI name="AmpA">
               <Private type="oc-iec61850-sas">
                 <oc:point deadband="0.5">
-                  <oc:meterIo address="xfmr1-lv-ammeter-adapter" method="getValue"/>
+                  <oc:meterIo address="xfmr1-lv-ammeter-a-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpB">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="xfmr1-lv-ammeter-b-adapter" method="getValue"/>
+                </oc:point>
+              </Private>
+            </DOI>
+            <DOI name="AmpC">
+              <Private type="oc-iec61850-sas">
+                <oc:point deadband="0.5">
+                  <oc:meterIo address="xfmr1-lv-ammeter-c-adapter" method="getValue"/>
                 </oc:point>
               </Private>
             </DOI>
@@ -622,10 +861,18 @@
               <oc:iedSettings tickIntervalSec="0.2" resyncSec="60" connectTimeoutSec="5"
                   reconnectIntervalSec="10" gooseStaleAfterSec="15" hmsPort="8103"/>
               <oc:historian dir="/var/log/sas-scada" maxBytes="262144" maxFiles="5"/>
-              <oc:alarm id="V1_LOW" ref="CB1/LD0/MMXU1.Vol" condition="lt" value="720000"
-                  severity="medium" message="800kV Bus A undervoltage at CB1"/>
-              <oc:alarm id="XFMR1_DIFF_TRIP" ref="XFMR1/LD0/PDIF1.Op" condition="eq" value="true"
-                  severity="critical" message="Transformer XFMR1 differential protection operated"/>
+              <oc:alarm id="V1_LOW_AB" ref="CB1/LD0/MMXU1.VolAB" condition="lt" value="720000"
+                  severity="medium" message="800kV Bus A undervoltage (AB) at CB1"/>
+              <oc:alarm id="V1_LOW_BC" ref="CB1/LD0/MMXU1.VolBC" condition="lt" value="720000"
+                  severity="medium" message="800kV Bus A undervoltage (BC) at CB1"/>
+              <oc:alarm id="V1_LOW_CA" ref="CB1/LD0/MMXU1.VolCA" condition="lt" value="720000"
+                  severity="medium" message="800kV Bus A undervoltage (CA) at CB1"/>
+              <oc:alarm id="XFMR1_DIFF_TRIP_A" ref="XFMR1/LD0/PDIF1A.Op" condition="eq" value="true"
+                  severity="critical" message="Transformer XFMR1 differential protection operated (phase A)"/>
+              <oc:alarm id="XFMR1_DIFF_TRIP_B" ref="XFMR1/LD0/PDIF1B.Op" condition="eq" value="true"
+                  severity="critical" message="Transformer XFMR1 differential protection operated (phase B)"/>
+              <oc:alarm id="XFMR1_DIFF_TRIP_C" ref="XFMR1/LD0/PDIF1C.Op" condition="eq" value="true"
+                  severity="critical" message="Transformer XFMR1 differential protection operated (phase C)"/>
             </Private>
           </LN0>
         </LDevice>
@@ -642,8 +889,12 @@
       <DO name="PosCtl" type="DPC_Basic"/>
     </LNodeType>
     <LNodeType id="MMXU_Basic" lnClass="MMXU">
-      <DO name="Amp" type="MV_Basic"/>
-      <DO name="Vol" type="MV_Basic"/>
+      <DO name="AmpA" type="MV_Basic"/>
+      <DO name="AmpB" type="MV_Basic"/>
+      <DO name="AmpC" type="MV_Basic"/>
+      <DO name="VolAB" type="MV_Basic"/>
+      <DO name="VolBC" type="MV_Basic"/>
+      <DO name="VolCA" type="MV_Basic"/>
     </LNodeType>
     <LNodeType id="RDRE_Basic" lnClass="RDRE">
       <DO name="RcdMade" type="ACT_Basic"/>

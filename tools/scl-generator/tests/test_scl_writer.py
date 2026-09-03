@@ -78,12 +78,23 @@ class TestPrivateOrdering(unittest.TestCase):
         ln0 = root.find(".//{%s}LN0" % SCL_NS)
         self.assertEqual(self._first_child_tag(ln0), "{%s}Private" % SCL_NS)
 
-    def test_private_is_first_child_of_connected_ap(self):
+    def test_private_is_first_child_of_subnetwork(self):
+        tree = scl_writer.write(_minimal_station())
+        root = tree.getroot()
+        subnet = root.find(".//{%s}SubNetwork" % SCL_NS)
+        self.assertEqual(self._first_child_tag(subnet), "{%s}Private" % SCL_NS)
+
+    def test_connected_ap_has_no_private(self):
+        # ConnectedAP carried an oc:mmsAddress Private extension before
+        # this project moved off OC-IP-Stack's static addressing -- every
+        # node now resolves peers by name at runtime instead
+        # (sas/proto/discovery.lua), so ConnectedAP's first child is GSE
+        # directly.
         tree = scl_writer.write(_minimal_station())
         root = tree.getroot()
         for cap in root.findall(".//{%s}ConnectedAP" % SCL_NS):
             if cap.get("iedName") == "CB1":
-                self.assertEqual(self._first_child_tag(cap), "{%s}Private" % SCL_NS)
+                self.assertEqual(self._first_child_tag(cap), "{%s}GSE" % SCL_NS)
                 return
         self.fail("CB1's ConnectedAP not found")
 

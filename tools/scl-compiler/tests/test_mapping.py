@@ -15,6 +15,11 @@ from scl.mapping import map_document, map_ied, map_scada, MappingError
 from scl.codegen import encode
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "single_breaker.scd"
+# single_breaker.scd deliberately has no Substation/VoltageLevel topology
+# at all (see TestMapDiagram's absence test below) -- the real worked
+# example is the only fixture with real switchyard topology to exercise
+# map_diagram's happy path against.
+SWITCHYARD_FIXTURE = Path(__file__).resolve().parent.parent.parent.parent / "scl" / "switchyard.scd"
 
 
 def _load():
@@ -51,7 +56,6 @@ class TestMapIed(unittest.TestCase):
         self.assertEqual(self.cfg["mms"], {"port": 8102})
 
     def test_goose_transport(self):
-        self.assertEqual(self.cfg["goose"]["group"], "255.10")
         self.assertEqual(self.cfg["goose"]["port"], 8104)
         self.assertEqual(self.cfg["goose"]["heartbeatSec"], 5.0)
         # MinTime=100ms -> 0.1s ladder start, no Private override in fixture
@@ -118,18 +122,47 @@ class TestMapScada(unittest.TestCase):
         self.cfg = map_scada(self.root, ied_elem)
 
     def test_identity(self):
+        self.assertEqual(self.cfg["scadaName"], "SCADA1")
         self.assertEqual(self.cfg["hms"], {"port": 8103})
-        self.assertEqual(self.cfg["goose"], {"port": 8104, "group": "255.10"})
+        self.assertEqual(self.cfg["goose"], {"port": 8104})
         self.assertEqual(self.cfg["resyncSec"], 60)
 
     def test_ieds_derived_from_subnetwork(self):
-        self.assertEqual(self.cfg["ieds"], [{"name": "BRK1", "ip": "1.10", "port": 8102}])
+        self.assertEqual(self.cfg["ieds"], [{"name": "BRK1"}])
 
     def test_historian_and_alarms(self):
         self.assertEqual(self.cfg["historian"]["dir"], "/var/log/sas-scada")
         self.assertEqual(len(self.cfg["alarms"]), 1)
         self.assertEqual(self.cfg["alarms"][0]["id"], "V1_LOW")
         self.assertEqual(self.cfg["alarms"][0]["value"], 200)
+
+
+class TestMapDiagram(unittest.TestCase):
+    def test_absent_when_source_has_no_topology(self):
+        # single_breaker.scd has no Substation/VoltageLevel at all --
+        # map_scada must simply omit "diagram", not error.
+        self.root = _load()
+        ied_elem = next(c for c in self.root.iter() if c.tag.endswith("IED") and c.get("name") == "SCADA1")
+        cfg = map_scada(self.root, ied_elem)
+        self.assertNotIn("diagram", cfg)
+
+    def test_present_and_shaped_for_switchyard_scd(self):
+        root_elem = root(parse_file(SWITCHYARD_FIXTURE))
+        ied_elem = next(c for c in root_elem.iter() if c.tag.endswith("IED") and c.get("name") == "SCADA1")
+        cfg = map_scada(root_elem, ied_elem)
+        self.assertIn("diagram", cfg)
+        diagram = cfg["diagram"]
+
+        self.assertEqual({b["id"] for b in diagram["breakers"]}, {"CB1", "CB2", "CB3", "CB4", "CB5", "CB6"})
+        self.assertEqual(len(diagram["buses"]), 4)
+        # Ground truth confirmed during planning: switchyard.scd has no
+        # type="DIS" ConductingEquipment anywhere.
+        self.assertEqual(diagram["disconnects"], [])
+        self.assertEqual(len(diagram["transformerLinks"]), 1)
+        self.assertEqual(diagram["transformerLinks"][0]["name"], "XFMR1")
+
+        cb1 = next(b for b in diagram["breakers"] if b["id"] == "CB1")
+        self.assertEqual(cb1["statusFullRef"], "CB1/LD0/XCBR1.Pos")
 
 
 class TestCodegen(unittest.TestCase):

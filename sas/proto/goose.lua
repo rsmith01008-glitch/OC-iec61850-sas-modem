@@ -1,35 +1,24 @@
--- sas.proto.goose: GOOSE-lite fast peer messaging over multicast.
+-- sas.proto.goose: GOOSE-lite fast peer messaging over modem broadcast.
 --
--- Real IEC 61850 GOOSE is Ethernet-multicast. OC-IP-Stack now provides a
--- real multicast primitive (ipstack.socket.multicast(): join/leave/bind/
--- send/receivefrom, addressed in the same "subnet.host" space with
--- subnet 255 reserved for multicast groups -- see ip.MULTICAST_SUBNET/
--- ip.isMulticast), so publishing/subscribing GOOSE here means every node
--- joining one shared multicast group per station (sas/ied/engine.lua and
--- sas/scada/engine.lua each own their own socket.multicast() and
--- goose.group config -- this module has no transport/addressing concept
--- of its own). Everything below is deliberately transport-agnostic and
--- needed no changes when the transport moved from unicast fan-out to
--- multicast: stNum/sqNum change/retransmission counters, a fast
--- retransmit burst after a real change settling into a steady heartbeat,
--- mirroring real GOOSE's reliability-over-lossy-transport behavior.
-local serialization = require("serialization")
-
+-- Real IEC 61850 GOOSE is Ethernet-multicast. The nearest built-in
+-- OpenComputers equivalent is a modem broadcast
+-- (component.modem.broadcast(port, ...) -- see sas/proto/netmsg.lua):
+-- every node that has opened `goose.port` hears every publication, with
+-- no join/leave step needed -- the port number itself is the "group", so
+-- unlike OC-IP-Stack's addressed multicast groups there is no separate
+-- `goose.group` config anymore (sas/ied/engine.lua and
+-- sas/scada/engine.lua each own their own netmsg.open(cfg.goose.port) and
+-- broadcast/drain calls -- this module has no transport/addressing
+-- concept of its own). Everything below is deliberately transport-
+-- agnostic and needed no changes when the transport moved from
+-- OC-IP-Stack's multicast sockets to modem broadcast: stNum/sqNum
+-- change/retransmission counters, a fast retransmit burst after a real
+-- change settling into a steady heartbeat, mirroring real GOOSE's
+-- reliability-over-lossy-transport behavior. No wire encode/decode of its
+-- own either -- sas.proto.netmsg.send/broadcast/drain already
+-- serialize/deserialize whole Lua tables, so a GOOSE message table is
+-- just passed straight through as one.
 local goose = {}
-
--- Multicast datagrams are already delivered as discrete units by
--- ipstack.multicast (no stream framing needed, unlike sas.proto.framing's
--- TCP use), so these just wrap serialization.serialize/unserialize
--- directly.
-function goose.encodeWire(msgTable)
-  return serialization.serialize(msgTable)
-end
-
-function goose.decodeWire(raw)
-  local ok, msg = pcall(serialization.unserialize, raw)
-  if not ok or type(msg) ~= "table" then return nil, "could not decode GOOSE datagram" end
-  return msg
-end
 
 -- Encodes one GOOSE-lite dataset publication for iedName/ldName.
 -- `values` is { [ref] = {v=, q=} }.

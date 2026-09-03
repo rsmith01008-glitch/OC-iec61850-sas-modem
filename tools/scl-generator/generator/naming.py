@@ -108,8 +108,3 @@ def appid(base: int, index: int) -> str:
     correctly as decimal).
     """
     return "%04d" % (base + index - 1)
-
-
-def mms_address(subnet: int, host: int) -> str:
-    """OC-IP-Stack "subnet.host" address string, e.g. "1.11"."""
-    return "%d.%d" % (subnet, host)

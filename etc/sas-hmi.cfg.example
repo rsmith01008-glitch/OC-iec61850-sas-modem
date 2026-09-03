@@ -1,23 +1,26 @@
--- OC-IEC61850-SAS HMI configuration (MineOS).
+-- OC-IEC61850-SAS HMI configuration (OpenOS).
 --
--- Copy this file to /etc/sas-hmi.cfg (on the MineOS machine) and edit it.
+-- Copy this file to /etc/sas-hmi.cfg and edit it.
 -- Plain Lua table literal (serialization.unserialize).
 {
-  -- The SCADA node's MMS-lite server address/port (its `hms.port`).
-  scada = { ip = "1.1", port = 8103 },
+  -- The SCADA node's own name (its sas-scada.cfg `scadaName`) --
+  -- resolved to a modem address/port at runtime via discovery, no
+  -- address to configure.
+  scada = "SCADA",
 
   -- Sent as `clientId`/`operator` on every select/operate/cancel/alarm-ack
   -- -- identifies who issued a control action or acknowledged an alarm.
   operator = "operator1",
 
-  -- How often the MineOS GUI's periodic timer calls client:poll() to
-  -- drain reports/alarm-updates and refresh the display.
+  -- How often sas-hmi's event loop times out (with no touch/key_down
+  -- input in between) to call client:poll() and drain reports/
+  -- alarm-updates.
   pollIntervalSec = 0.5,
 
-  -- Optional manual placement for the mimic diagram. Any point reference
-  -- omitted here is auto-arranged in a grid instead. Keys are fully
-  -- qualified point references ("<iedName>/<ldName>/<LN>.<DOName>").
-  mimicLayout = {
-    -- ["IED-BRK1/LD0/XCBR1.Pos"] = { x = 100, y = 80 },
+  -- Arrow-key pan step, in character cells, over the one-line diagram
+  -- when it's larger than the screen.
+  viewport = {
+    panStepCols = 4,
+    panStepRows = 2,
   },
 }

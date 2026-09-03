@@ -13,17 +13,21 @@ ReportControl/DOI all direct children of LN0 and LN alike, via a shared
 base type), and tLN/tLN0 (`lnType` required attribute on both).
 
 Substation/VoltageLevel/Bay/ConductingEquipment/Terminal/ConnectivityNode
-are intentionally NOT read here -- see the plan's §3: nothing downstream
-has a bay/diameter/topology concept, so the single-line geometry stays
-descriptive-only (human-facing + optional --lint-topology), not consumed
-for .cfg generation.
+ARE read here, by `map_diagram` (via `topology.py` + `char_layout.py`) --
+the one-line diagram SCADA serves to the OpenOS HMI (`sas/hmi/*`) is
+compiled from this real topology, not hand-authored. This is the one
+place in this compiler that consumes the switchyard's physical
+connectivity rather than treating it as descriptive-only; everything
+else in this file (points, GOOSE, reports, protection, interlocks) still
+comes entirely from LN/LN0/DOI/Private, untouched by this.
 """
 
 from .parse import q, oc_q, children, child, find_all
 from .private_ext import (
     point_private, ln0_private, subnetwork_private, report_control_private,
-    connected_ap_private, scada_private, gse_timing_private,
+    scada_private, gse_timing_private, connectivity_node_private,
 )
+from . import topology, char_layout
 
 CDC_TO_TYPE = {
     "SPS": "SPS",
@@ -179,13 +183,11 @@ def _map_goose(root_elem, ied_elem, ied_name, ld_inst, ln0_elem):
 
     sn_elem, ap_elem = _find_subnetwork_and_ap(root_elem, ied_name)
     transport = subnetwork_private(sn_elem)
-    if "gooseGroup" not in transport:
+    if "goosePort" not in transport:
         raise MappingError(
-            "SubNetwork '%s' has no Private/oc:transport/@gooseGroup" % sn_elem.get("name")
+            "SubNetwork '%s' has no Private/oc:transport/@goosePort" % sn_elem.get("name")
         )
-    goose_cfg = {"group": transport["gooseGroup"]}
-    if "gooseGroupPort" in transport:
-        goose_cfg["port"] = transport["gooseGroupPort"]
+    goose_cfg = {"port": transport["goosePort"]}
 
     gse_elem = None
     for gse in children(ap_elem, "GSE"):
@@ -318,12 +320,41 @@ def map_ied(root_elem, ied_elem):
     return cfg
 
 
+def _tap_kinds(root_elem):
+    """{connectivityNodePath -> "line"|"feeder"} from every
+    ConnectivityNode/Private/oc:tap in the document -- see
+    private_ext.connectivity_node_private's header for why this is
+    optional (real SCL has no reliable structural line-vs-feeder signal).
+    """
+    out = {}
+    for cn in find_all(root_elem, "ConnectivityNode"):
+        ext = connectivity_node_private(cn)
+        if "kind" in ext:
+            out[cn.get("pathName")] = ext["kind"]
+    return out
+
+
+def map_diagram(root_elem):
+    """Whole document -> the compiled one-line-diagram `diagram` dict
+    (see scl/char_layout.py's build_diagram), or {} if the document has
+    no real Substation/VoltageLevel topology to lay out (a minimal/
+    legacy SCD, or one authored before this feature existed) -- absence
+    is a normal, backward-compatible outcome, not an error; map_scada
+    only attaches `cfg["diagram"]` when this returns something non-empty.
+    """
+    voltage_levels = topology.parse_voltage_levels(root_elem)
+    transformers = topology.parse_transformers(root_elem)
+    tap_kinds = _tap_kinds(root_elem)
+    return char_layout.build_diagram(voltage_levels, transformers, tap_kinds)
+
+
 def map_scada(root_elem, ied_elem):
     """Map the <IED type="SCADA"> element to its sas-scada.cfg dict.
 
     `ieds[]` is derived from every OTHER IED sharing a SubNetwork with this
-    one -- its `ip`/`port` come from THAT peer IED's own ConnectedAP
-    Private/oc:mmsAddress and LN0 Private/oc:iedSettings/@mmsPort.
+    one -- just its `name` (see sas/proto/discovery.lua: SCADA resolves
+    each configured IED's modem address/port at runtime, so nothing else
+    needs to be carried through from SCL).
     """
     ld_elem = _find_ldevice(ied_elem)
     ln0 = ld_elem.find(q("LN0"))
@@ -332,22 +363,20 @@ def map_scada(root_elem, ied_elem):
     scada_ext = scada_private(ln0)
 
     cfg = {}
+    cfg["scadaName"] = ied_elem.get("name")
     cfg["hms"] = {"port": settings.get("hmsPort", 8103)}
 
     # SCADA never publishes GOOSE (no GSEControl of its own -- it only
     # subscribes), so unlike a breaker/protection IED it can't go through
-    # _map_goose (which resolves group/port via a GSEControl<->GSE join).
-    # It only needs group/port, read directly off its SubNetwork.
+    # _map_goose (which resolves the port via a GSEControl<->GSE join). It
+    # only needs the port, read directly off its SubNetwork.
     sn_elem, _ = _find_subnetwork_and_ap(root_elem, ied_elem.get("name"))
     transport = subnetwork_private(sn_elem)
-    if "gooseGroup" not in transport:
+    if "goosePort" not in transport:
         raise MappingError(
-            "SubNetwork '%s' has no Private/oc:transport/@gooseGroup" % sn_elem.get("name")
+            "SubNetwork '%s' has no Private/oc:transport/@goosePort" % sn_elem.get("name")
         )
-    cfg["goose"] = {
-        "port": transport.get("gooseGroupPort", 8104),
-        "group": transport["gooseGroup"],
-    }
+    cfg["goose"] = {"port": transport["goosePort"]}
 
     for key in (
         "tickIntervalSec", "resyncSec", "connectTimeoutSec",
@@ -368,26 +397,20 @@ def map_scada(root_elem, ied_elem):
                 break
         if peer_ied is None or peer_ied.get("type") == "SCADA":
             continue
-        peer_ld = _find_ldevice(peer_ied)
-        peer_ln0 = peer_ld.find(q("LN0"))
-        peer_settings = ln0_private(peer_ln0)["iedSettings"]
-        mms_addr = connected_ap_private(ap)
-        if "address" not in mms_addr:
-            raise MappingError(
-                "peer IED '%s' ConnectedAP has no Private/oc:mmsAddress/@address "
-                "(needed for SCADA's ieds[].ip)" % peer_name
-            )
-        ieds.append({
-            "name": peer_name,
-            "ip": mms_addr["address"],
-            "port": peer_settings.get("mmsPort", 8102),
-        })
+        # Just the name -- sas/proto/discovery.lua resolves it to a modem
+        # address/port at runtime, so no ConnectedAP address/port needs to
+        # be carried through from SCL at all.
+        ieds.append({"name": peer_name})
     cfg["ieds"] = ieds
 
     if scada_ext["historian"]:
         cfg["historian"] = scada_ext["historian"]
     if scada_ext["alarms"]:
         cfg["alarms"] = scada_ext["alarms"]
+
+    diagram = map_diagram(root_elem)
+    if diagram:
+        cfg["diagram"] = diagram
 
     return cfg
 

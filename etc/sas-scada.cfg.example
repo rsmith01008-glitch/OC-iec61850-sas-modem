@@ -4,15 +4,20 @@
 -- literal (serialization.unserialize) -- see sas-ied.cfg.example's header
 -- for the same syntax notes. Restart after editing: rc scadad restart
 --
--- Requires ipstackd (OC-IP-Stack) already configured and running on this
--- machine.
+-- Requires a modem component on this machine (wired or wireless network
+-- card) -- see sas-ied.cfg.example's header. No separate networking
+-- daemon/config needed.
 {
-  -- MMS-lite TCP server port for HMI clients.
+  -- Name this SCADA answers "who-is" discovery queries for -- must match
+  -- every sas-hmi.cfg's `scada` field on every HMI node that talks to it.
+  scadaName = "SCADA",
+
+  -- MMS-lite server port for HMI clients, opened on this machine's modem.
   hms = { port = 8103 },
 
-  -- GOOSE subscriber -- must join the same multicast group as every
-  -- IED's goose.group, and bind the same port as every IED's goose.port.
-  goose = { port = 8104, group = "255.10" },
+  -- GOOSE subscriber -- must match the modem port every IED's goose.port
+  -- broadcasts/listens on (see sas-ied.cfg.example's goose.port comment).
+  goose = { port = 8104 },
 
   tickIntervalSec = 0.2,
 
@@ -28,11 +33,13 @@
   gooseStaleAfterSec = 15,
 
   -- Every IED this SCADA connects to. SCADA does NOT need each IED's
-  -- point list here -- it learns that automatically via get-model on
-  -- connect. `name` must exactly match that IED's own `iedName`.
+  -- address, port, or point list here -- `name` (which must exactly
+  -- match that IED's own `iedName`) is resolved to a modem
+  -- address/port at runtime via discovery, and the point list is learned
+  -- automatically via get-model on connect.
   ieds = {
-    { name = "IED-BRK1", ip = "1.10", port = 8102 },
-    -- { name = "IED-BRK2", ip = "1.11", port = 8102 },
+    { name = "IED-BRK1" },
+    -- { name = "IED-BRK2" },
   },
 
   historian = {
@@ -45,10 +52,21 @@
   -- aggregate database. `ref` is a fully qualified point reference
   -- ("<iedName>/<ldName>/<LN>.<DOName>"); `condition` is one of
   -- "eq"|"ne"|"lt"|"gt".
+  -- Bus undervoltage as three phase-pair alarms, not one: a single-phase
+  -- sag (the common case for an unbalanced fault) only depresses one of
+  -- VolAB/VolBC/VolCA, so alarming on just one pair would miss it.
   alarms = {
     {
-      id = "V1_LOW", ref = "IED-BRK1/LD0/MMXU1.Vol", condition = "lt", value = 200,
-      severity = "medium", message = "Bus 1 undervoltage",
+      id = "V1_LOW_AB", ref = "IED-BRK1/LD0/MMXU1.VolAB", condition = "lt", value = 200,
+      severity = "medium", message = "Bus 1 undervoltage (AB)",
+    },
+    {
+      id = "V1_LOW_BC", ref = "IED-BRK1/LD0/MMXU1.VolBC", condition = "lt", value = 200,
+      severity = "medium", message = "Bus 1 undervoltage (BC)",
+    },
+    {
+      id = "V1_LOW_CA", ref = "IED-BRK1/LD0/MMXU1.VolCA", condition = "lt", value = 200,
+      severity = "medium", message = "Bus 1 undervoltage (CA)",
     },
     {
       id = "BRK1_OPEN", ref = "IED-BRK1/LD0/XCBR1.Pos", condition = "eq", value = "open",

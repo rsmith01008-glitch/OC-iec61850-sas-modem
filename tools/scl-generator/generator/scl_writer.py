@@ -34,6 +34,14 @@ from .topology import (  # noqa: E402
 from .derive import remote_trips_for, illustrative_interlocks  # noqa: E402
 from . import naming  # noqa: E402
 
+# Per-phase current (WYE) and phase-to-phase voltage (DEL) DO names -- see
+# _build_data_type_templates's comment for why these replace the single
+# "Amp"/"Vol" DO real hardware never actually has (each is one physical
+# Create:EE meter block bridged through its own OpenComputers Adapter,
+# and a 3-phase circuit needs 3 of each kind, not 1).
+AMP_PHASES = ("AmpA", "AmpB", "AmpC")
+VOL_PHASES = ("VolAB", "VolBC", "VolCA")
+
 
 def _el(parent, tag, attrib=None, text=None):
     """Appends a real-SCL-namespaced child. `attrib` values are
@@ -93,8 +101,17 @@ def _build_data_type_templates(root):
     _el(xcbr_basic, "DO", {"name": "PosCtl", "type": "DPC_Basic"})
 
     mmxu_basic = _el(dtt, "LNodeType", {"id": "MMXU_Basic", "lnClass": "MMXU"})
-    _el(mmxu_basic, "DO", {"name": "Amp", "type": "MV_Basic"})
-    _el(mmxu_basic, "DO", {"name": "Vol", "type": "MV_Basic"})
+    # Real hardware exposes one Create:EE meter block per sensing point --
+    # a 3-phase circuit needs 3 independent ammeters (per-phase current)
+    # and 3 independent voltmeters (per-phase-pair voltage), never one
+    # meter standing in for all three. AMP_PHASES/VOL_PHASES below are the
+    # single source of truth for these 6 DO names; a breaker IED
+    # instantiates all 6 (see _build_breaker_ied), a transformer's HV/LV
+    # CT-only MMXU instantiates only the 3 AMP_PHASES ones (see
+    # _build_transformer_ied) -- SCL allows an LN to leave any DO in its
+    # LNodeType un-DOI'd, so sharing one LNodeType for both is valid.
+    for do_name in AMP_PHASES + VOL_PHASES:
+        _el(mmxu_basic, "DO", {"name": do_name, "type": "MV_Basic"})
 
     rdre_basic = _el(dtt, "LNodeType", {"id": "RDRE_Basic", "lnClass": "RDRE"})
     _el(rdre_basic, "DO", {"name": "RcdMade", "type": "ACT_Basic"})
@@ -207,12 +224,9 @@ def _build_bay(vl_elem, bay: BayGroup, node_paths):
 def _build_communication(root, station: Station, mac_appid_index: Dict[str, int]):
     comm = _el(root, "Communication")
     subnet = _el(comm, "SubNetwork", {"name": "StationBus", "type": "8-MMS",
-                                       "desc": "Shared GOOSE multicast group + MMS-lite station LAN"})
+                                       "desc": "Shared GOOSE broadcast port + MMS-lite station LAN"})
     priv = _private(subnet)
-    _oc_el(priv, "transport", {
-        "gooseGroup": station.network.goose_group,
-        "gooseGroupPort": station.network.goose_group_port,
-    })
+    _oc_el(priv, "transport", {"goosePort": station.network.goose_port})
 
     for i, breaker in enumerate(station.all_breakers(), start=1):
         _build_connected_ap_breaker(subnet, station, breaker, i)
@@ -226,10 +240,6 @@ def _build_communication(root, station: Station, mac_appid_index: Dict[str, int]
 def _build_connected_ap_breaker(subnet, station: Station, breaker: Breaker, index: int):
     net = station.network
     cap = _el(subnet, "ConnectedAP", {"iedName": breaker.name, "apName": "AP1"})
-    priv = _private(cap)
-    _oc_el(priv, "mmsAddress", {
-        "address": naming.mms_address(net.mms_subnet, net.mms_host_start_breakers + index - 1),
-    })
     gse = _el(cap, "GSE", {"ldInst": "LD0", "cbName": "gcbGoose1"})
     addr = _el(gse, "Address")
     _el(addr, "P", {"type": "MAC-Address"}, text=naming.mac_address(net.mac_prefix, index))
@@ -243,11 +253,7 @@ def _build_connected_ap_breaker(subnet, station: Station, breaker: Breaker, inde
 def _build_connected_ap_transformer(subnet, station: Station, xfmr: Transformer, mac_appid_idx: int):
     net = station.network
     cap = _el(subnet, "ConnectedAP", {"iedName": xfmr.name, "apName": "AP1"})
-    priv = _private(cap)
     xfmr_index = station.transformers.index(xfmr) + 1
-    _oc_el(priv, "mmsAddress", {
-        "address": naming.mms_address(net.mms_subnet, net.mms_host_start_transformers + xfmr_index - 1),
-    })
     gse = _el(cap, "GSE", {"ldInst": "LD0", "cbName": "gcbGoose1"})
     addr = _el(gse, "Address")
     _el(addr, "P", {"type": "MAC-Address"}, text=naming.mac_address(net.mac_prefix, mac_appid_idx))
@@ -266,14 +272,10 @@ def _build_connected_ap_transformer(subnet, station: Station, xfmr: Transformer,
 
 
 def _build_connected_ap_scada(subnet, station: Station):
-    net = station.network
-    cap = _el(subnet, "ConnectedAP", {"iedName": station.scada.ied_name, "apName": "AP1"})
-    if net.scada_mms_host is not None:
-        priv = _private(cap)
-        _oc_el(priv, "mmsAddress", {"address": naming.mms_address(net.mms_subnet, net.scada_mms_host)})
-    # else: bare <ConnectedAP/>, matching switchyard.scd -- SCADA never
-    # publishes GOOSE, so it needs no GSE, and gets no mmsAddress unless
-    # the user explicitly opted it into one.
+    _el(subnet, "ConnectedAP", {"iedName": station.scada.ied_name, "apName": "AP1"})
+    # Bare <ConnectedAP/>, matching switchyard.scd -- SCADA never publishes
+    # GOOSE, so it needs no GSE, and no address of any kind: every node
+    # resolves peers by name at runtime (sas/proto/discovery.lua).
 
 
 # --------------------------------------------------------------------
@@ -315,21 +317,38 @@ def _build_breaker_ied(root, station: Station, breaker: Breaker, interlocks, rem
             "id": interlock_id, "localRef": "XCBR1.PosCtl", "blockValue": "closed",
             "peerIed": peer_name, "peerRef": "XCBR1.Pos", "condition": "eq", "peerValue": "closed",
         })
-    ptoc_attrib = {
-        "name": "PTOC1", "input": "MMXU1.Amp", "trip": "XCBR1.PosCtl",
-        "pickup": prot.ptoc_pickup, "curve": prot.ptoc_curve, "resetSec": prot.ptoc_reset_sec,
-        "respectInterlocks": False,
-    }
-    if prot.ptoc_curve == "DEFINITE_TIME":
-        ptoc_attrib["definiteTimeSec"] = prot.ptoc_definite_time_sec
-    else:
-        ptoc_attrib["timeMultiplier"] = prot.ptoc_time_multiplier
-    _oc_el(priv, "ptocScheme", ptoc_attrib)
+    # One ptocScheme PER PHASE (PTOC1A/B/C, each watching its own phase
+    # current) rather than one scheme fed by a single aggregate reading --
+    # matches real numerical relays' separate 50/51-A/B/C elements, and is
+    # required for correctness here since MMXU1 only ever exposes 3
+    # independent per-phase current points now (see AMP_PHASES), never one
+    # combined "Amp". A single-phase-to-ground fault (the most common
+    # fault type) only elevates one phase's current, so a scheme watching
+    # just one phase would miss faults on the other two.
+    for phase, amp_do in zip("ABC", AMP_PHASES):
+        ptoc_attrib = {
+            "name": "PTOC1%s" % phase, "input": "MMXU1.%s" % amp_do, "trip": "XCBR1.PosCtl",
+            "pickup": prot.ptoc_pickup, "curve": prot.ptoc_curve, "resetSec": prot.ptoc_reset_sec,
+            "respectInterlocks": False,
+        }
+        if prot.ptoc_curve == "DEFINITE_TIME":
+            ptoc_attrib["definiteTimeSec"] = prot.ptoc_definite_time_sec
+        else:
+            ptoc_attrib["timeMultiplier"] = prot.ptoc_time_multiplier
+        _oc_el(priv, "ptocScheme", ptoc_attrib)
     for xfmr in remote_trip_xfmrs:
-        _oc_el(priv, "remoteTrip", {
-            "id": "%s_DIFF_TRIP" % xfmr.name, "peerIed": xfmr.name, "peerRef": "PDIF1.Op",
-            "condition": "eq", "peerValue": True, "localRef": "XCBR1.PosCtl", "tripValue": "open",
-        })
+        # One remoteTrip per phase's differential element (see
+        # _build_transformer_ied's PDIF1A/B/C) -- any single phase's
+        # differential operating must open this breaker, so each phase's
+        # Op is its own independent rule (matches the interlocks/
+        # remoteTrips list-of-independent-rules pattern already used
+        # elsewhere, no "OR of refs" primitive needed).
+        for phase in "ABC":
+            _oc_el(priv, "remoteTrip", {
+                "id": "%s_DIFF_TRIP_%s" % (xfmr.name, phase), "peerIed": xfmr.name,
+                "peerRef": "PDIF1%s.Op" % phase,
+                "condition": "eq", "peerValue": True, "localRef": "XCBR1.PosCtl", "tripValue": "open",
+            })
 
     dataset = _el(ln0, "DataSet", {"name": "dsGoose1"})
     _el(dataset, "FCDA", {"lnClass": "XCBR", "lnInst": 1, "doName": "Pos", "fc": "ST"})
@@ -359,15 +378,20 @@ def _build_breaker_ied(root, station: Station, breaker: Breaker, interlocks, rem
         "pulseMs": 250, "sboTimeoutSec": 30,
     })
 
+    # 3 independent ammeters (per-phase current) + 3 independent
+    # voltmeters (per-phase-pair voltage) -- one physical Create:EE meter
+    # block, and one Adapter-bridged address, per DOI. See AMP_PHASES/
+    # VOL_PHASES's definition above for why this replaced a single
+    # combined "Amp"/"Vol" pair.
     mmxu = _el(ld, "LN", {"prefix": "", "lnClass": "MMXU", "inst": 1, "lnType": "MMXU_Basic"})
-    doi_amp = _el(mmxu, "DOI", {"name": "Amp"})
-    amp_priv = _private(doi_amp)
-    amp_point = _oc_el(amp_priv, "point", {"deadband": 0.5})
-    _oc_el(amp_point, "meterIo", {"address": "%s-ammeter-adapter" % prefix, "method": "getValue"})
-    doi_vol = _el(mmxu, "DOI", {"name": "Vol"})
-    vol_priv = _private(doi_vol)
-    vol_point = _oc_el(vol_priv, "point", {"deadband": 2.0})
-    _oc_el(vol_point, "meterIo", {"address": "%s-voltmeter-adapter" % prefix, "method": "getValue"})
+    for suffix, do_name in zip("abc", AMP_PHASES):
+        doi = _el(mmxu, "DOI", {"name": do_name})
+        point = _oc_el(_private(doi), "point", {"deadband": 0.5})
+        _oc_el(point, "meterIo", {"address": "%s-ammeter-%s-adapter" % (prefix, suffix), "method": "getValue"})
+    for suffix, do_name in zip("ab bc ca".split(), VOL_PHASES):
+        doi = _el(mmxu, "DOI", {"name": do_name})
+        point = _oc_el(_private(doi), "point", {"deadband": 2.0})
+        _oc_el(point, "meterIo", {"address": "%s-voltmeter-%s-adapter" % (prefix, suffix), "method": "getValue"})
 
 
 def _build_transformer_ied(root, station: Station, xfmr: Transformer):
@@ -393,20 +417,31 @@ def _build_transformer_ied(root, station: Station, xfmr: Transformer):
         "gooseStaleAfterSec": ied_settings.goose_stale_after_sec,
         "mmsPort": ied_settings.mms_port,
     })
-    pdif = _oc_el(priv, "pdifScheme", {
-        "name": "PDIF1", "minPickup": prot.pdif_min_pickup,
-        "restraintSlope": prot.pdif_restraint_slope, "respectInterlocks": False,
-    })
-    _oc_el(pdif, "input", {"ref": "MMXU1.Amp", "scale": xfmr.scale_hv})
-    _oc_el(pdif, "input", {"ref": "MMXU2.Amp", "scale": round(xfmr.scale_lv, 3)})
+    # One pdifScheme PER PHASE (PDIF1A/B/C, each comparing that phase's
+    # HV CT against that same phase's LV CT) -- a single scheme fed by
+    # only one representative phase would both miss a single-phase
+    # internal fault on either of the other two phases, and could
+    # false-trip by comparing two DIFFERENT phases' currents if the
+    # "representative" phase ever differed between HV and LV (e.g. a
+    # Dyn11 vector group's phase rotation) -- pdif.lua is magnitude-only
+    # with no such compensation (see sas/protection/pdif.lua's header),
+    # so per-phase comparison is the only correct pairing here.
+    for phase, amp_do in zip("ABC", AMP_PHASES):
+        pdif = _oc_el(priv, "pdifScheme", {
+            "name": "PDIF1%s" % phase, "minPickup": prot.pdif_min_pickup,
+            "restraintSlope": prot.pdif_restraint_slope, "respectInterlocks": False,
+        })
+        _oc_el(pdif, "input", {"ref": "MMXU1.%s" % amp_do, "scale": xfmr.scale_hv})
+        _oc_el(pdif, "input", {"ref": "MMXU2.%s" % amp_do, "scale": round(xfmr.scale_lv, 3)})
     _oc_el(priv, "pdisScheme", {
         "name": "PDIS1", "zone1ReachOhms": 12.5, "zone1DelaySec": 0,
         "zone2ReachOhms": 25, "zone2DelaySec": 0.3,
     })
 
     dataset = _el(ln0, "DataSet", {"name": "dsStatus1"})
-    _el(dataset, "FCDA", {"lnClass": "MMXU", "lnInst": 1, "doName": "Amp", "fc": "MX"})
-    _el(dataset, "FCDA", {"lnClass": "MMXU", "lnInst": 2, "doName": "Amp", "fc": "MX"})
+    for lnInst in (1, 2):
+        for amp_do in AMP_PHASES:
+            _el(dataset, "FCDA", {"lnClass": "MMXU", "lnInst": lnInst, "doName": amp_do, "fc": "MX"})
 
     rc = _el(ln0, "ReportControl", {"name": "rcb%s" % xfmr.name, "datSet": "dsStatus1", "confRev": 1, "bufTime": 0})
     _el(rc, "TrgOps", {"dchg": True, "qchg": True, "gi": True})
@@ -421,18 +456,23 @@ def _build_transformer_ied(root, station: Station, xfmr: Transformer):
     })
     _el(svc, "SmvOpts")
 
+    # 3 independent ammeters per side (per-phase current) -- no voltage
+    # DOIs here, unlike a breaker's MMXU: a transformer differential
+    # scheme only ever needs current (see pdifScheme above), and this
+    # LNodeType's VolAB/BC/CA DOs are simply left un-DOI'd, which real SCL
+    # allows (see AMP_PHASES/VOL_PHASES's definition above).
     prefix = xfmr.name.lower()
     mmxu1 = _el(ld, "LN", {"prefix": "", "lnClass": "MMXU", "inst": 1, "lnType": "MMXU_Basic", "desc": "HV-side CT"})
-    doi1 = _el(mmxu1, "DOI", {"name": "Amp"})
-    p1 = _private(doi1)
-    pt1 = _oc_el(p1, "point", {"deadband": 0.5})
-    _oc_el(pt1, "meterIo", {"address": "%s-hv-ammeter-adapter" % prefix, "method": "getValue"})
+    for suffix, amp_do in zip("abc", AMP_PHASES):
+        doi = _el(mmxu1, "DOI", {"name": amp_do})
+        point = _oc_el(_private(doi), "point", {"deadband": 0.5})
+        _oc_el(point, "meterIo", {"address": "%s-hv-ammeter-%s-adapter" % (prefix, suffix), "method": "getValue"})
 
     mmxu2 = _el(ld, "LN", {"prefix": "", "lnClass": "MMXU", "inst": 2, "lnType": "MMXU_Basic", "desc": "LV-side CT"})
-    doi2 = _el(mmxu2, "DOI", {"name": "Amp"})
-    p2 = _private(doi2)
-    pt2 = _oc_el(p2, "point", {"deadband": 0.5})
-    _oc_el(pt2, "meterIo", {"address": "%s-lv-ammeter-adapter" % prefix, "method": "getValue"})
+    for suffix, amp_do in zip("abc", AMP_PHASES):
+        doi = _el(mmxu2, "DOI", {"name": amp_do})
+        point = _oc_el(_private(doi), "point", {"deadband": 0.5})
+        _oc_el(point, "meterIo", {"address": "%s-lv-ammeter-%s-adapter" % (prefix, suffix), "method": "getValue"})
 
     _el(ld, "LN", {
         "prefix": "", "lnClass": "RDRE", "inst": 1, "lnType": "RDRE_Basic",
@@ -470,23 +510,29 @@ def _build_scada_ied(root, station: Station):
             if ref_breaker is None:
                 continue
             threshold = vl.kv * 1000 * scada.undervoltage_ratio
-            _oc_el(priv, "alarm", {
-                "id": "%s_VOLTAGE_LOW" % vl.vl_name,
-                "ref": "%s/LD0/MMXU1.Vol" % ref_breaker.name,
-                "condition": "lt", "value": round(threshold),
-                "severity": "medium",
-                "message": "%skV bus undervoltage at %s" % (_attr_str(vl.kv), ref_breaker.name),
-            })
+            # One alarm per phase-pair -- a single-phase sag (the common
+            # case for an unbalanced fault) only depresses one of the
+            # three VolAB/BC/CA readings, so alarming on just one pair
+            # would miss it.
+            for pair, vol_do in zip("AB BC CA".split(), VOL_PHASES):
+                _oc_el(priv, "alarm", {
+                    "id": "%s_VOLTAGE_LOW_%s" % (vl.vl_name, pair),
+                    "ref": "%s/LD0/MMXU1.%s" % (ref_breaker.name, vol_do),
+                    "condition": "lt", "value": round(threshold),
+                    "severity": "medium",
+                    "message": "%skV bus undervoltage (%s) at %s" % (_attr_str(vl.kv), pair, ref_breaker.name),
+                })
 
     if scada.auto_trip_alarms:
         for xfmr in station.transformers:
-            _oc_el(priv, "alarm", {
-                "id": "%s_DIFF_TRIP" % xfmr.name,
-                "ref": "%s/LD0/PDIF1.Op" % xfmr.name,
-                "condition": "eq", "value": True,
-                "severity": "critical",
-                "message": "Transformer %s differential protection operated" % xfmr.name,
-            })
+            for phase in "ABC":
+                _oc_el(priv, "alarm", {
+                    "id": "%s_DIFF_TRIP_%s" % (xfmr.name, phase),
+                    "ref": "%s/LD0/PDIF1%s.Op" % (xfmr.name, phase),
+                    "condition": "eq", "value": True,
+                    "severity": "critical",
+                    "message": "Transformer %s differential protection operated (phase %s)" % (xfmr.name, phase),
+                })
 
 
 # --------------------------------------------------------------------

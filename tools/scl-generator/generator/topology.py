@@ -202,12 +202,7 @@ class ProtectionDefaults:
 
 @dataclass
 class NetworkDefaults:
-    goose_group: str = "255.10"
-    goose_group_port: int = 8104
-    mms_subnet: int = 1
-    mms_host_start_breakers: int = 11
-    mms_host_start_transformers: int = 20
-    scada_mms_host: Optional[int] = None  # None = SCADA gets no oc:mmsAddress/GSE
+    goose_port: int = 8104
     mac_prefix: str = "01-0C-CD-01-00-"
     appid_base: int = 1
     vlan_id: str = "000"
