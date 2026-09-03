@@ -16,6 +16,7 @@
 -- the client disconnected) after maxRetries -- at which point the caller
 -- (sas.scada.engine's tickIeds, or the HMI) reconnects the same way it
 -- always did on a TCP failure.
+local computer = require("computer")
 local netmsg = require("sas.proto.netmsg")
 local discovery = require("sas.proto.discovery")
 local messages = require("sas.proto.messages")

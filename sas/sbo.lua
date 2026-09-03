@@ -8,6 +8,8 @@
 -- so there is exactly one authoritative copy of "who has this point
 -- reserved" and it can never drift out of sync with the machine that
 -- actually drives the redstone output.
+local computer = require("computer")
+
 local sbo = {}
 
 local Mgr = {}
