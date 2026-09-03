@@ -36,6 +36,35 @@ is why `XFMR1`'s differential trip reaches all four via `remoteTrips[]`
 on those four breaker IEDs, not two -- one `remoteTrip[]` rule per phase
 per breaker (`PDIF1A/B/C.Op`; see below), not one.
 
+## One-line diagram
+
+`tools/scl-compiler/` also derives the HMI's one-line diagram from this
+file's real topology (`ConductingEquipment`/`Terminal`/`ConnectivityNode`
+connectivity -- see that tool's README's "Diagram emission" section).
+Two things worth knowing about how `switchyard.scd` in particular renders:
+
+- **Zero disconnect symbols.** Every `ConductingEquipment` here is
+  `type="CBR"` (a breaker) -- there is no `type="DIS"` equipment anywhere
+  in this file, so the compiled diagram has an empty `disconnects[]`.
+  Disconnects are drawn as static/neutral tick symbols when present (no
+  live status data exists for them anywhere in this codebase); a `.scd`
+  produced by `tools/scl-generator/` with isolating disconnects added
+  (`generator/layouts/common.py`'s `add_isolating_disconnects`) will show
+  them.
+- **Line/feeder tap glyphs need an extra hint.** N1 (`Line1` tap) and N4
+  (`Feed1` tap) render with a neutral "unknown" tap glyph here, because
+  this file predates the `ConnectivityNode/Private/oc:tap kind="line"|
+  "feeder"` extension `tools/scl-compiler/scl/private_ext.py` reads --
+  tap kind is never guessed from `desc` text (same "not guessed from
+  content" rule as every other `Private` extension in this project).
+  Adding `<Private type="oc-iec61850-sas"><oc:tap kind="line"/></Private>`
+  under N1's `ConnectivityNode` (and `kind="feeder"` under N4's) would
+  enable the filled/hollow-triangle glyph distinction for this file, same
+  as `tools/scl-generator/`-produced `.scd`s already get via their own
+  writer convention. Transformer taps (N2/N3) need no such hint -- they're
+  always identified structurally, from `PowerTransformer/
+  TransformerWinding/Terminal/@connectivityNode`.
+
 ## IEDs
 
 - `CB1`..`CB6`: one per breaker. Own `XCBR1.Pos`/`PosCtl` (redstone),

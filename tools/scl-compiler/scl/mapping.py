@@ -13,17 +13,21 @@ ReportControl/DOI all direct children of LN0 and LN alike, via a shared
 base type), and tLN/tLN0 (`lnType` required attribute on both).
 
 Substation/VoltageLevel/Bay/ConductingEquipment/Terminal/ConnectivityNode
-are intentionally NOT read here -- see the plan's §3: nothing downstream
-has a bay/diameter/topology concept, so the single-line geometry stays
-descriptive-only (human-facing + optional --lint-topology), not consumed
-for .cfg generation.
+ARE read here, by `map_diagram` (via `topology.py` + `char_layout.py`) --
+the one-line diagram SCADA serves to the OpenOS HMI (`sas/hmi/*`) is
+compiled from this real topology, not hand-authored. This is the one
+place in this compiler that consumes the switchyard's physical
+connectivity rather than treating it as descriptive-only; everything
+else in this file (points, GOOSE, reports, protection, interlocks) still
+comes entirely from LN/LN0/DOI/Private, untouched by this.
 """
 
 from .parse import q, oc_q, children, child, find_all
 from .private_ext import (
     point_private, ln0_private, subnetwork_private, report_control_private,
-    scada_private, gse_timing_private,
+    scada_private, gse_timing_private, connectivity_node_private,
 )
+from . import topology, char_layout
 
 CDC_TO_TYPE = {
     "SPS": "SPS",
@@ -316,6 +320,34 @@ def map_ied(root_elem, ied_elem):
     return cfg
 
 
+def _tap_kinds(root_elem):
+    """{connectivityNodePath -> "line"|"feeder"} from every
+    ConnectivityNode/Private/oc:tap in the document -- see
+    private_ext.connectivity_node_private's header for why this is
+    optional (real SCL has no reliable structural line-vs-feeder signal).
+    """
+    out = {}
+    for cn in find_all(root_elem, "ConnectivityNode"):
+        ext = connectivity_node_private(cn)
+        if "kind" in ext:
+            out[cn.get("pathName")] = ext["kind"]
+    return out
+
+
+def map_diagram(root_elem):
+    """Whole document -> the compiled one-line-diagram `diagram` dict
+    (see scl/char_layout.py's build_diagram), or {} if the document has
+    no real Substation/VoltageLevel topology to lay out (a minimal/
+    legacy SCD, or one authored before this feature existed) -- absence
+    is a normal, backward-compatible outcome, not an error; map_scada
+    only attaches `cfg["diagram"]` when this returns something non-empty.
+    """
+    voltage_levels = topology.parse_voltage_levels(root_elem)
+    transformers = topology.parse_transformers(root_elem)
+    tap_kinds = _tap_kinds(root_elem)
+    return char_layout.build_diagram(voltage_levels, transformers, tap_kinds)
+
+
 def map_scada(root_elem, ied_elem):
     """Map the <IED type="SCADA"> element to its sas-scada.cfg dict.
 
@@ -375,6 +407,10 @@ def map_scada(root_elem, ied_elem):
         cfg["historian"] = scada_ext["historian"]
     if scada_ext["alarms"]:
         cfg["alarms"] = scada_ext["alarms"]
+
+    diagram = map_diagram(root_elem)
+    if diagram:
+        cfg["diagram"] = diagram
 
     return cfg
 

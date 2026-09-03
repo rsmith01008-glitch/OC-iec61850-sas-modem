@@ -71,11 +71,13 @@ without pulling in the full worked example.
 exact schema element/attribute names this was cross-checked against)
 
 - **Substation/VoltageLevel/Bay/ConductingEquipment/Terminal/ConnectivityNode
-  are NOT read by this compiler.** Nothing in `sas/model.lua` or the
-  runtime engines has a bay/diameter/topology concept — that part of SCL
-  stays purely descriptive (the human-facing single-line diagram), not
-  something the compiler consumes. There is no `--lint-topology` flag
-  (would need genuine consumers of that data to be worth building).
+  are read by `map_diagram` (`scl/topology.py` + `scl/char_layout.py`),
+  for one purpose only: deriving the HMI's one-line diagram** (bus bars,
+  breaker/disconnect positions, transformer/line/feeder taps, conductor
+  segments — see "Diagram emission" below). Nothing in `sas/model.lua` or
+  the runtime engines has a bay/diameter/topology concept beyond that; no
+  point type, GOOSE membership, or protection behavior is derived from
+  this data, only screen coordinates.
 - One `<IED>` → one LDevice, asserted (errors otherwise — matches
   `sas/model.lua`'s hardcoded single-LDevice-per-IED assumption).
 - Points: every `DOI` under every `LN`/`LN0` in that LDevice, with its CDC
@@ -107,6 +109,51 @@ exact schema element/attribute names this was cross-checked against)
   integrity/stale-after settings, and (on the SCADA IED) historian config
   and alarm definitions. See `scl/private_ext.py`'s module docstring and
   `tests/fixtures/single_breaker.scd` for the concrete element shapes.
+
+## Diagram emission
+
+`map_diagram` (called from `map_scada`, `scl/mapping.py`) walks every
+`VoltageLevel/Bay`'s `ConductingEquipment`/`Terminal`/`ConnectivityNode`
+graph (`scl/topology.py`) and lays it out in character-cell coordinates
+(`scl/char_layout.py`), classifying each equipment-bearing bay as a
+breaker-and-half-style "chain" (bus → breaker → tap → breaker → ... →
+bus) or a single-bus-style "star" (one bus, several breaker+tap spokes)
+purely from its connectivity — real SCL has no explicit "layout kind"
+attribute. The result is written to `cfg["diagram"]` (only when the
+source `.scd` actually has voltage-level topology — a `.scd` with none
+simply gets no `diagram` key, same optional-field convention as
+`reports[]`), and `sas/scada/engine.lua` serves it verbatim to HMI
+clients on `get-model-reply`. Node identity throughout is the full
+`ConnectivityNode` **path**, never the bare `cNodeName` — real SCL reuses
+short names like `"Bus"` across different bays.
+
+Two things need an explicit hint, since real SCL has no standard home for
+either:
+
+- **Line/feeder tap glyph** (`kind="line"|"feeder"` vs. the neutral
+  `"unknown"` default): `ConnectivityNode/Private/oc:tap kind="line"|
+  "feeder"` (`scl/private_ext.py`'s `connectivity_node_private`) — never
+  guessed from `desc` text, same rule as every other `Private` extension
+  here. Transformer taps need no hint: any `ConnectivityNode` referenced
+  by a `PowerTransformer/TransformerWinding/Terminal/@connectivityNode`
+  is identified structurally.
+- **Disconnects**: rendered as static/neutral symbols at their real
+  topological position when `ConductingEquipment/@type="DIS"` is present
+  — this codebase has no live status source for a disconnect anywhere
+  (no IED, no redstone binding, no GOOSE), so they're never colored or
+  animated as if live, unlike a breaker tile.
+
+This module deliberately does **not** share code with
+`tools/scl-generator/generator/diagram/layout_geometry.py` (that tool's
+own SVG-diagram layout math), despite similar-looking geometry: different
+input shapes (`scl-generator`'s authoring-time dataclasses vs. plain
+dicts parsed straight from real SCL, which never passes through
+`scl-generator` for a hand-authored `.scd`), a different unit scale (SVG
+pixels vs. character cells, not just a constant swap), and — most
+importantly — `scl-generator` already depends on `scl-compiler`
+one-way (via `scl_writer.py`), so sharing code the other direction would
+invert that dependency. See `scl/char_layout.py`'s module docstring for
+the full reasoning.
 
 ## A real-SCL constraint worth knowing before authoring `scl/switchyard.scd`
 

@@ -2,7 +2,7 @@
 
 An IEC 61850-inspired substation automation system for
 [OpenComputers](https://oc.cil.li/): a generic **IED**, a **SCADA** data
-concentrator, and a **MineOS** HMI, talking a simplified MMS-lite/GOOSE-lite
+concentrator, and an **OpenOS** HMI, talking a simplified MMS-lite/GOOSE-lite
 protocol directly over OpenComputers' own built-in modem component
 (wired or wireless network card -- either works identically, see
 `sas/proto/netmsg.lua`). No external networking mod/dependency required.
@@ -30,7 +30,7 @@ multicast group would.
 ```
   scl/switchyard.scd  --[offline SCL compiler]-->  etc/generated/*.cfg  --[manual copy]-->  /etc/sas-*.cfg
 
-   HMI (MineOS)  <--MMS-lite (modem unicast)-->  SCADA  <--MMS-lite (modem unicast)-->  IED A
+   HMI (OpenOS)  <--MMS-lite (modem unicast)-->  SCADA  <--MMS-lite (modem unicast)-->  IED A
                                                     |                                       |
                                                     +============ GOOSE-lite ===============+==== IED B  ...
                                                      (modem broadcast, one shared             |
@@ -71,9 +71,16 @@ peer-to-peer interlocking (see below) needs no involvement from SCADA.
   that aggregate to HMI clients. Forwards HMI control commands down to the
   owning IED; SCADA itself holds no select-before-operate reservation
   state of its own (see `sas/sbo.lua`).
-- **HMI** (`mineos/SAS-HMI.app/`): a MineOS GUI application, not an
-  OpenOS/oppm package. Pure MMS-lite client of SCADA -- never talks to an
-  IED directly.
+- **HMI** (`sas/hmi/`, `usr/bin/sas-hmi.lua`): a full-screen OpenOS
+  terminal program, installed via oppm (`oc-sas-hmi`) exactly like the IED
+  and SCADA roles. Renders a one-line switchyard diagram (bus bars,
+  breakers, disconnects, transformer/line/feeder taps) auto-derived at
+  compile time from the compiled SCL topology (see "SCL / Substation
+  Configuration Language" below), with live status coloring, per-phase
+  measurement readouts, a select-before-operate control dialog, and an
+  alarm panel; a hand-written (non-compiled) `sas-scada.cfg` with no
+  `diagram` falls back to an auto-arranged grid of point tiles. Pure
+  MMS-lite client of SCADA -- never talks to an IED directly.
 
 Both `iedd` and `scadad` are `rc.d` daemons whose tick callback
 (`event.timer`) does one **entirely non-blocking** sweep every cycle:
@@ -168,6 +175,19 @@ process-bus-streaming concept, so none of it is enforced.
 1½-breaker 800kV/230kV switchyard (two 3-breaker diameters, one
 transformer, one line, one feeder -- see `scl/README.md` for the full
 topology and why it's trivially repeatable for a larger station).
+
+The compiler also derives the HMI's one-line diagram from the same real
+`Substation`/`VoltageLevel`/`Bay`/`ConductingEquipment`/`Terminal`/
+`ConnectivityNode` topology (`tools/scl-compiler/scl/topology.py` +
+`char_layout.py`), emitting a `diagram` block into `sas-scada.cfg` (bus
+bars, breaker/disconnect positions, transformer/line/feeder taps, and
+conductor segments, in character-cell coordinates) that SCADA serves
+verbatim to the HMI on `get-model-reply`. A hand-written, non-compiled
+`sas-scada.cfg` simply has no `diagram` field, and the HMI falls back to
+an auto-arranged grid instead. Line/feeder taps need an optional
+`ConnectivityNode/Private/oc:tap kind="line"|"feeder"` extension to
+render with the correct glyph (see `scl/README.md`); transformer taps are
+always identified structurally, no extension needed.
 
 ## Protection
 
@@ -271,46 +291,25 @@ rc scadad start
 
 Inspect a running `iedd`/`scadad` with `sas-ctl <status|points|alarms|log [n]>`.
 
-## Install (MineOS: HMI node)
+## Install (OpenOS: HMI node)
 
-Copy `mineos/SAS-HMI.app/` into MineOS's `Applications` folder on the HMI
-machine (per MineOS's own docs, an application is just a `.app` directory
-containing `Main.lua` plus an optional `Icon.pic` -- see
-`mineos/SAS-HMI.app/ICON_NOTE.txt`), and `sas/`, `sas/proto/`,
-`sas/sbo.lua`, `sas/model.lua`, `sas/config.lua`, `sas/util.lua` alongside
-it somewhere MineOS's `require()` can resolve (oppm can't install into a
-MineOS filesystem, so this is a manual copy, not `oppm install`). Copy
-`etc/sas-hmi.cfg.example` to `/etc/sas-hmi.cfg` and edit it (SCADA's
-name, operator name).
+```
+# Needs a modem component (wired or wireless network card) and a screen +
+# GPU -- tier 3 (~160x50 characters) is the primary target; smaller tiers
+# work via the pannable viewport (arrow keys), but a large diagram may not
+# fit on screen all at once.
 
-`mineos/SAS-HMI.app/Main.lua`'s `GUI.*`/`system.*`/`event.*` calls
-(`system.addWindow`, `GUI.titledWindow`, `GUI.addBackgroundContainer`,
-`event.addHandler`, `object:remove()`, etc.) have been cross-checked
-against MineOS's actual wiki
-(`github.com/IgorTimofeev/MineOS.wiki`, `System-API.md`/`GUI-API.md`/
-`Event-API.md`) -- not guessed, as an earlier version of this file was.
-That verification also caught and fixed a bug that would have broken the
-app outright: creating a second top-level `GUI.workspace()` and calling
-`workspace:start()` conflicts with MineOS's own already-running desktop
-event loop; the app now adds a window into MineOS's existing shared
-workspace (`system.addWindow`) and registers its network-poll callback via
-MineOS's own `event.addHandler`, matching the pattern in `System-API.md`'s
-own MineOS-integration example. Two details remain genuinely unverified
-since the wiki doesn't document them: `Icon.pic`'s exact pixel
-format/dimensions, and the title bar's exact height in rows (`Main.lua`'s
-`TITLE_HEIGHT` is an approximation) -- both cosmetic, not structural.
+oppm install oc-sas-hmi
+cp /etc/sas-hmi.cfg.example /etc/sas-hmi.cfg   # edit: SCADA name, operator name
+sas-hmi
+```
 
-**Known risk:** whether `component.modem`/`event.listen("modem_message",
-...)` (`sas/proto/netmsg.lua`) behaves identically under MineOS (a
-distinct OS from OpenOS, with its own filesystem/kernel implementation)
-as under OpenOS is unverified from this development environment -- this
-is a transport-layer question, unrelated to the GUI API points above. Per
-direction, the HMI is built assuming it works the same way it does under
-OpenOS/SCADA; verify this on first real deployment. If it does not port
-cleanly, the fallback is a small headless OpenOS "gateway" machine running
-a thin bridge, networked to the MineOS machine, so the HMI's
-`sas/proto/mmsclient.lua` and `sas/model.lua` code needs no changes --
-only the transport glue moves.
+`sas-hmi` is a foreground program (like `sas-ctl`), not an `rc.d` daemon --
+run it directly from a shell on the HMI machine. Click a breaker tile to
+open its control/measurement dialog (select, operate open/close, cancel,
+or close with Escape); arrow keys pan the diagram when it's larger than
+the screen; `q` quits. Ctrl+C also exits cleanly (terminal state is always
+restored on the way out, whichever path triggered it).
 
 ## Protocol summary
 
@@ -362,12 +361,6 @@ same as before).
   `component.list()`/`component.proxy(addr).getMethods()` against your
   actual modpack's OpenComputers build, and set each gauge's in-world
   scale dial to match the configured `deadband`.
-- **Modem transport under MineOS compatibility** and two cosmetic MineOS
-  details (`Icon.pic` format, exact title bar height) -- see above. The
-  MineOS GUI API calls themselves are no longer a guess (cross-checked
-  against MineOS's actual wiki), only whether `component.modem`/
-  `event.listen` have been run against a real MineOS install (see Testing
-  below).
 - Everything else (protocol, data model, control flow, redstone I/O) was
   validated by direct code review against OpenComputers' actual component
   API documentation, but none of it has been run inside the actual mod --
@@ -390,7 +383,7 @@ same as before).
 
 ## Testing
 
-There is no way to execute `component`/`event`/OpenComputers or MineOS APIs
+There is no way to execute `component`/`event`/OpenComputers APIs
 outside the actual game. Every file was syntax-checked with `luac5.3 -p` (Lua 5.3,
 matching OpenComputers' Lua version); `.luacheckrc` declares the OC/OpenOS
 globals this codebase uses. `sas/protection/{curves,ptoc,pdif}.lua` have
@@ -493,8 +486,19 @@ runbook, in order:
    discovery, since the modem's address may have changed), `get-model` +
    `subscribe` re-run, and a full resync -- without manually restarting
    `scadad`.
-11. **HMI.** Before GUI polish: confirm `component.modem`/
-   `event.listen("modem_message", ...)` and a `select`/`operate` round
-   trip work from a minimal script under real MineOS (the risk noted
-   above). Then exercise the mimic diagram, control dialog, alarm
-   panel/ack, and history query end to end.
+11. **HMI.** Bring up `scadad` with a compiled `sas-scada.cfg` (a `diagram`
+   present); confirm `sas-hmi` renders the one-line diagram (bus bars,
+   breakers, taps) at the correct positions, and that the tap-symbol
+   glyphs (filled/hollow triangle, `(T)`) actually render rather than
+   showing as tofu on the real OC GPU font -- fall back to ASCII
+   (`^`/`v`/`<`/`>`) in `sas/hmi/render.lua` if not. Toggle a breaker's
+   redstone input and confirm its tile recolors live. Pan past the
+   viewport edge (arrow keys) on a diagram larger than the screen and
+   confirm it clamps rather than scrolling past the edge. Click a breaker
+   tile and run the merged control+measurement dialog through both
+   select->operate and select->cancel; confirm Escape closes it. Ack an
+   alarm from the alarm panel. Separately, start `sas-hmi` against a
+   hand-written (non-compiled) `sas-scada.cfg` with no `diagram` and
+   confirm the auto-grid fallback still renders and is still
+   interactive. Confirm Ctrl+C and `q` both exit cleanly, restoring the
+   terminal.

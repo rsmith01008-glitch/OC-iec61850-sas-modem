@@ -1,4 +1,4 @@
--- luacheck config for OpenComputers/OpenOS/MineOS Lua code. Declares the
+-- luacheck config for OpenComputers/OpenOS Lua code. Declares the
 -- component-model globals and OpenOS library globals this codebase uses,
 -- so luacheck doesn't false-positive "undefined global" on every file.
 std = "lua53"

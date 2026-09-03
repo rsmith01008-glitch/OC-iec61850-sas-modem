@@ -154,7 +154,7 @@ end
 
 -- Blocking convenience: send a request and wait (polling + os.sleep)
 -- up to timeoutSec for its reply. ONLY for foreground/manual use
--- (usr/bin/sas-ctl.lua, the MineOS HMI's startup handshake) -- never call
+-- (usr/bin/sas-ctl.lua, the HMI's startup handshake) -- never call
 -- this from inside a daemon tick, which must stay non-blocking end to end.
 function Client:request(msg, timeoutSec)
   timeoutSec = timeoutSec or 10

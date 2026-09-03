@@ -192,6 +192,28 @@ def subnetwork_private(subnetwork_elem):
     return _attrs(transport, ["goosePort"], numeric=_TRANSPORT_NUMERIC)
 
 
+def connectivity_node_private(cn_elem):
+    """ConnectivityNode/Private/oc:tap -> {kind="line"|"feeder"} or {}.
+
+    Real SCL has no reliable schema-level signal for whether a switchyard
+    tap is a line or a feeder connection (a transformer tap IS reliably
+    derivable structurally -- see scl/char_layout.py's `_tap_kind` --
+    but line vs. feeder is purely a naming/desc-text convention even in
+    tools/scl-generator's own output). This optional extension lets an
+    author say so explicitly for the one-line diagram's tap glyph;
+    absent, char_layout.py resolves the tap to "unknown" rather than
+    guessing from `@desc` text (see this module's own docstring on that
+    point).
+    """
+    priv = find_private(cn_elem)
+    if priv is None:
+        return {}
+    tap = priv.find(oc_q("tap"))
+    if tap is None:
+        return {}
+    return _attrs(tap, ["kind"])
+
+
 def report_control_private(rc_elem):
     """ReportControl/Private/oc:reportSettings -> {periodSec=...} or {}."""
     priv = find_private(rc_elem)

@@ -291,7 +291,17 @@ local function handleGetModel(client, msg)
       return model.fullRef(iedName, aggEntry.ld or "?", ln, doName)
     end)
   end
-  sendMsg(client, messages.replyTo(msg, { ld = "SCADA", points = points }))
+  -- diagram: the one-line-diagram geometry tools/scl-compiler's
+  -- map_diagram compiled from the real SCL switchyard topology (see
+  -- scl/char_layout.py), passed straight through from this SCADA's own
+  -- cfg. Absent (nil, so simply missing from the reply table) for a
+  -- hand-written sas-scada.cfg that never went through the compiler --
+  -- the HMI falls back to an auto-arranged grid of points in that case,
+  -- same as this project's other optional-field backward-compatibility
+  -- rules (e.g. reports[] on an IED's own get-model-reply).
+  sendMsg(client, messages.replyTo(msg, {
+    ld = "SCADA", points = points, diagram = engine.state.cfg.diagram,
+  }))
 end
 
 local function handleRead(client, msg)
