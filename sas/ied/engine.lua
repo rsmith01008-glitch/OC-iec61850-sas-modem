@@ -4,6 +4,7 @@
 -- tick() itself must stay entirely non-blocking (no os.sleep, no
 -- timeoutSec>0 ipstack.socket call), matching daemon.lua's safeTick.
 local event = require("event")
+local computer = require("computer")
 local netmsg = require("sas.proto.netmsg")
 local discovery = require("sas.proto.discovery")
 

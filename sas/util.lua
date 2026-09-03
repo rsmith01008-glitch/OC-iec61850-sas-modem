@@ -2,6 +2,8 @@
 -- pattern established by OC-IP-Stack's ipstack.util.makeLogger (kept as a
 -- separate copy here, not a dependency on the ipstack.* namespace, so
 -- sas/ stays cleanly layered on top of ipstack.socket only).
+local computer = require("computer")
+
 local util = {}
 
 function util.makeLogger(sink, ringSize)
@@ -10,7 +12,7 @@ function util.makeLogger(sink, ringSize)
     local ok, msg = pcall(string.format, fmt, ...)
     if not ok then msg = fmt end
     table.insert(sink, {
-      time = computer and computer.uptime and computer.uptime() or os.time(),
+      time = computer.uptime(),
       level = level,
       message = msg,
     })

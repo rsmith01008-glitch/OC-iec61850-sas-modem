@@ -4,7 +4,7 @@
 std = "lua53"
 
 globals = {
-  "component", "computer", "event", "sides", "colors", "unicode",
+  "component", "event", "sides", "colors", "unicode",
   "os", "io", "table", "string", "math",
   -- rc.d service files define these as bare globals, invoked by `rc`.
   "start", "stop", "status", "restart",

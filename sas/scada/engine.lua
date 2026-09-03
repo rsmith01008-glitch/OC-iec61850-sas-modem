@@ -9,6 +9,7 @@
 -- control commands are forwarded down to the owning IED. Also runs
 -- alarm evaluation and historian logging.
 local event = require("event")
+local computer = require("computer")
 local netmsg = require("sas.proto.netmsg")
 local discovery = require("sas.proto.discovery")
 
